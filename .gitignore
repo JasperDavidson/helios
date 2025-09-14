@@ -1,0 +1,5 @@
+# Ignore CMake build directory
+build/
+
+# Ignore compile_commands.json (used for clangd)
+compile_commands.json
