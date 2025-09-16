@@ -17,10 +17,9 @@ public:
 private:
   std::vector<std::thread> workers;
   std::queue<std::function<void()>> task_queue;
-  std::mutex mtx;
+  std::mutex queue_mtx;
   std::condition_variable cv;
   bool stop = false;
-  int num_threads;
 
   void worker_loop();
 };
