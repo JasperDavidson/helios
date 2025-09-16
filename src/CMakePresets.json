@@ -3,13 +3,15 @@
   "configurePresets": [
     {
       "name": "homebrew-clang",
-      "displayName": "Homebrew Clang 17",
-      "description": "Build using the Clang compiler from Homebrew",
+      "displayName": "Homebrew Clang",
+      "description": "Build using the complete Clang toolchain from Homebrew",
       "generator": "Unix Makefiles",
-      "binaryDir": "${sourceDir}/build",
+      "binaryDir": "${sourceDir}/../build",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "/opt/homebrew/opt/llvm/bin/clang",
-        "CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm/bin/clang++"
+        "CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm/bin/clang++",
+        "CMAKE_EXE_LINKER_FLAGS": "-L/opt/homebrew/opt/llvm/lib/c++",
+	"CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     }
   ]

@@ -3,16 +3,51 @@
 
 #include <condition_variable>
 #include <functional>
+#include <future>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <type_traits>
+#include <utility>
 
 class ThreadPool {
 public:
   ThreadPool(size_t num_threads);
   ~ThreadPool();
 
-  void add_task(std::function<void()> task);
+  template <typename F, class... Types>
+  auto add_task(F &&task, Types &&...task_args) {
+    // Wrap the task call with its arguments inside a lambda such that the queue
+    // can always store consistent type of std::function<void()>
+
+    // Using a packaged type + futures allows the outside user to access the
+    // results of the task
+
+    // && is a forwarding reference, using it with std::forward allows efficient
+    // determination between l/r-values
+    using TaskReturnType = std::invoke_result_t<decltype(task), Types...>;
+    auto bound_task =
+        std::bind(std::forward<F>(task), std::forward<Types...>(task_args...));
+    std::shared_ptr<std::packaged_task<TaskReturnType()>> task_package =
+        std::make_shared<std::packaged_task<TaskReturnType()>>(bound_task);
+    std::future<TaskReturnType> task_future = task_package->get_future();
+
+    auto wrapper = [task_package]() { (*task_package)(); };
+
+    {
+      // Lock the mutex, emplace the task into the queue, then unlock the mutex
+      // This prevents threads from accessing the queue as tasks are being added
+      std::unique_lock<std::mutex> lock(queue_mtx);
+      task_queue.emplace(wrapper);
+    }
+
+    // Notify just one thread (undeterministic) that the task queue is ready to
+    // be read from
+    cv.notify_one();
+
+    return task_future;
+  }
 
 private:
   std::vector<std::thread> workers;
