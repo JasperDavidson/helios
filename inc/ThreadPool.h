@@ -8,6 +8,7 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -17,7 +18,8 @@ public:
   ~ThreadPool();
 
   template <typename F, class... Types>
-  auto add_task(F &&task, Types &&...task_args) {
+  auto add_task(F &&task, Types &&...task_args)
+      -> std::future<std::invoke_result_t<F, Types...>> {
     // Wrap the task call with its arguments inside a lambda such that the queue
     // can always store consistent type of std::function<void()>
 
@@ -26,9 +28,12 @@ public:
 
     // && is a forwarding reference, using it with std::forward allows efficient
     // determination between l/r-values
-    using TaskReturnType = std::invoke_result_t<decltype(task), Types...>;
+    using TaskReturnType = std::invoke_result_t<F, Types...>;
     auto bound_task =
-        std::bind(std::forward<F>(task), std::forward<Types...>(task_args...));
+        [captured_task = std::forward<F>(task),
+         captured_args = std::make_tuple(std::forward<Types>(task_args)...)]() {
+          std::apply(captured_task, captured_args);
+        };
     std::shared_ptr<std::packaged_task<TaskReturnType()>> task_package =
         std::make_shared<std::packaged_task<TaskReturnType()>>(bound_task);
     std::future<TaskReturnType> task_future = task_package->get_future();
