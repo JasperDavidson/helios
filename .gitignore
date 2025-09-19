@@ -1,5 +1,8 @@
 # Ignore CMake build directory
 build/
 
+# Ignore the clangd cache
+.cache/
+
 # Ignore compile_commands.json (used for clangd)
 compile_commands.json

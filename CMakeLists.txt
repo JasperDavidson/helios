@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.19)
 project(helios)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -11,13 +11,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
-add_executable(test ThreadPool.cpp thread_pool_tests.cpp)
-target_include_directories(test PUBLIC ../inc)
+add_executable(pool_test src/ThreadPool/ThreadPool.cpp tests/thread_pool_tests.cpp)
+target_include_directories(pool_test PUBLIC inc)
 
 target_link_libraries(
-  test
+  pool_test
   GTest::gtest_main
 )
 
 include(GoogleTest)
-gtest_discover_tests(test)
+gtest_discover_tests(pool_test)

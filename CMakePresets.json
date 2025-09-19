@@ -6,7 +6,7 @@
       "displayName": "Homebrew Clang",
       "description": "Build using the complete Clang toolchain from Homebrew",
       "generator": "Unix Makefiles",
-      "binaryDir": "${sourceDir}/../build",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "/opt/homebrew/opt/llvm/bin/clang",
         "CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm/bin/clang++",
