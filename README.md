@@ -15,5 +15,5 @@ Key Features:
 
 - Dynamic Placement: The long-term goal is for the scheduler to use its cost models to intelligently decide where to run tasks at runtime, adapting to system load and data locality to squeeze out maximum performance.
 
-Current Status & End Goal:\n
+Current Status & End Goal:\
 The core framework is currently under development.
