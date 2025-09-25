@@ -5,7 +5,6 @@ Helios is a C++ framework I'm building to simplify high-performance programming 
 Problem:
 Modern computer hardware is incredibly powerful, offering a diverse team of specialized processors on a single chip. However, writing software that efficiently utilizes this hardware is painfully complex. Developers are forced to manually manage low-level details like data transfers, synchronization, and vendor-specific APIs (like CUDA or Metal), which is slow, error-prone, and not portable. This creates a massive gap between the hardware's potential performance and what most applications can actually achieve.
 
-The Solution:
 Helios bridges this gap by providing two key components:
 - A Simple Task-Graph API: A developer can describe their complex, parallel workload as a simple graph of dependencies, focusing on what they want to compute.
 
@@ -16,5 +15,5 @@ Key Features:
 
 - Dynamic Placement: The long-term goal is for the scheduler to use its cost models to intelligently decide where to run tasks at runtime, adapting to system load and data locality to squeeze out maximum performance.
 
-Current Status & End Goal:
+Current Status & End Goal:\n
 The core framework is currently under development.
