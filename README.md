@@ -1,5 +1,7 @@
 (WIP)
 
+A description of the explanation behind each system component and architecture decision is available in docs/
+
 Helios is a C++ framework I'm building to simplify high-performance programming on systems with both CPUs and GPUs. It also serves as a performance simulator for exploring future hardware-software co-designs.
 
 Problem:
