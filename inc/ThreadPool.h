@@ -25,9 +25,6 @@ public:
 
     // Using a packaged type + futures allows the outside user to access the
     // results of the task
-
-    // && is a forwarding reference, using it with std::forward allows efficient
-    // determination between l/r-values
     using TaskReturnType = std::invoke_result_t<F, Types...>;
     auto bound_task =
         [captured_task = std::forward<F>(task),
@@ -43,23 +40,23 @@ public:
     {
       // Lock the mutex, emplace the task into the queue, then unlock the mutex
       // This prevents threads from accessing the queue as tasks are being added
-      std::unique_lock<std::mutex> lock(queue_mtx);
-      task_queue.emplace(wrapper);
+      std::unique_lock<std::mutex> lock(queue_mtx_);
+      task_queue_.emplace(wrapper);
     }
 
     // Notify just one thread (undeterministic) that the task queue is ready to
     // be read from
-    cv.notify_one();
+    cv_.notify_one();
 
     return task_future;
   }
 
 private:
-  std::vector<std::thread> workers;
-  std::queue<std::function<void()>> task_queue;
-  std::mutex queue_mtx;
-  std::condition_variable cv;
-  bool stop = false;
+  std::vector<std::thread> workers_;
+  std::queue<std::function<void()>> task_queue_;
+  std::mutex queue_mtx_;
+  std::condition_variable cv_;
+  bool stop_ = false;
 
   void worker_loop();
 };
