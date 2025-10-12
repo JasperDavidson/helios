@@ -9,6 +9,7 @@
 
 @protocol MTLDevice;
 @protocol MTLCommandQueue;
+@protocol MTLBuffer;
 @protocol MTLLibrary;
 @protocol MTLComputePipelineState;
 
@@ -39,11 +40,14 @@ private:
 
   // Metal specific variables
   id<MTLDevice> mtl_device_;
-  id<MTLCommandQueue> cmd_queue_;
+  id<MTLCommandQueue> command_queue_;
   id<MTLLibrary> mtl_library_;
 
   // Hashmap for storing already prepared compute pipelines
   std::unordered_map<std::string, id<MTLComputePipelineState>> kernel_map_;
+  // Hashmap for storing GPU buffer handles
+  int buffer_counter = 0;
+  std::unordered_map<GPUBufferHandle, id<MTLBuffer>> buffer_map_;
 
   void initialize();
   void load_default_library();

@@ -4,11 +4,13 @@
 #include <span>
 
 // TODO: Add more options as interface is built out
-enum class GPUState { GPUSuccess, GPUFailure };
+enum class GPUState { GPUSuccess, GhostBuffer, GPUFailure };
 
 class GPUBufferHandle {
 public:
   int ID;
+
+  GPUBufferHandle(int ID) : ID(ID) {};
 };
 
 class IGPUExecutor {
