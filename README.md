@@ -1,4 +1,4 @@
-Helios
+# Helios
 A C++ task-graph scheduler for real-time LiDAR processing in autonomous racing.
 
 ### Problem
@@ -14,5 +14,5 @@ Full Kernel Control: Write your own highly-optimized CUDA/Metal kernels for task
 
 Backend-Agnostic: Develop the pipeline on a Metal-based laptop and deploy on a CUDA-based in-car computer with zero changes to the graph logic.
 
-### Status/
+### Status
 Currently building the core runtime and Metal executor. The immediate goal is to execute a simple, two-stage LiDAR filtering pipeline on a public dataset (e.g., KITTI) to validate the core architecture.
