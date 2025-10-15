@@ -13,8 +13,6 @@
 @protocol MTLLibrary;
 @protocol MTLComputePipelineState;
 
-id<MTLLibrary> fetch_library(id<MTLDevice> device, NSString *library_name);
-
 class MetalExecutor : public IGPUExecutor {
   public:
     MetalExecutor();
@@ -28,8 +26,8 @@ class MetalExecutor : public IGPUExecutor {
     GPUState copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
                               std::uint32_t data_size) override;
 
-    GPUState execute_kernel(const std::string &kernel_name, const std::vector<GPUBufferHandle> &buffer_handles,
-                            const std::vector<int> &kernel_size) override;
+    GPUState execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type) override;
+    GPUState execute_kernel(const KernelDispatch &kernel) override;
 
     GPUState synchronize() override;
 
@@ -42,13 +40,14 @@ class MetalExecutor : public IGPUExecutor {
     id<MTLLibrary> mtl_library_;
 
     // Hashmap for storing already prepared compute pipelines
-    std::unordered_map<std::string, id<MTLComputePipelineState>> kernel_map_;
+    std::unordered_map<std::string, id<MTLComputePipelineState>> pipeline_map_;
     // Hashmap for storing GPU buffer handles
     int buffer_counter = 0;
     std::unordered_map<GPUBufferHandle, id<MTLBuffer>> buffer_map_;
 
     void initialize();
     void load_default_library();
+    id<MTLComputePipelineState> find_cache_pipeline(const std::string &kernel_name);
 };
 
 #endif

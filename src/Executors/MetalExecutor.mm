@@ -3,8 +3,10 @@
 #include "Metal/Metal.h"
 #include <Foundation/Foundation.h>
 #include <Foundation/NSObjCRuntime.h>
+#include <MacTypes.h>
 #include <Metal/Metal.h>
 #include <_string.h>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
@@ -22,14 +24,40 @@ void MetalExecutor::load_default_library() {
     NSError *library_error = nil;
     id<MTLLibrary> library = [mtl_device_ newLibraryWithURL:library_url error:&library_error];
 
-    if (library == nil) {
+    if (library_error != nil) {
         std::string error_message = "Failed to fetch default kernel library. Description: ";
         error_message += [[library_error localizedDescription] UTF8String];
         throw std::runtime_error(error_message);
     }
 
     mtl_library_ = library;
-};
+}
+
+id<MTLComputePipelineState> MetalExecutor::find_cache_pipeline(const std::string &kernel_name) {
+    auto cache_iter = pipeline_map_.find(kernel_name);
+
+    if (cache_iter != pipeline_map_.end()) {
+        return cache_iter->second;
+    }
+
+    NSString *ns_name = [NSString stringWithUTF8String:kernel_name.c_str()];
+    id<MTLFunction> kernel_func = [mtl_library_ newFunctionWithName:ns_name];
+    if (kernel_func == nil) {
+        throw std::runtime_error("No kernel function with name: " + kernel_name + " was found");
+    }
+
+    NSError *pipeline_creation_error;
+    id<MTLComputePipelineState> compute_pipeline =
+        [mtl_device_ newComputePipelineStateWithFunction:kernel_func error:&pipeline_creation_error];
+    if (pipeline_creation_error != nil) {
+        std::string error_message = "Failed to create compute pipeline for the kernel function: " + kernel_name;
+        error_message += [[pipeline_creation_error localizedDescription] UTF8String];
+        throw std::runtime_error(error_message);
+    }
+
+    pipeline_map_[kernel_name] = compute_pipeline;
+    return compute_pipeline;
+}
 
 void MetalExecutor::initialize() {
     if (!mtl_device_) {
@@ -38,10 +66,10 @@ void MetalExecutor::initialize() {
     command_queue_ = [mtl_device_ newCommandQueue];
     load_default_library();
 
-    kernel_map_ = std::unordered_map<std::string, id<MTLComputePipelineState>>();
-};
+    pipeline_map_ = std::unordered_map<std::string, id<MTLComputePipelineState>>();
+}
 
-MetalExecutor::MetalExecutor() : mtl_device_(MTLCreateSystemDefaultDevice()) { initialize(); };
+MetalExecutor::MetalExecutor() : mtl_device_(MTLCreateSystemDefaultDevice()) { initialize(); }
 
 GPUBufferHandle MetalExecutor::allocate_buffer(std::uint32_t buffer_size, const BufferUsage &buffer_usage,
                                                const MemoryHint &mem_hint) {
@@ -59,7 +87,7 @@ GPUBufferHandle MetalExecutor::allocate_buffer(std::uint32_t buffer_size, const 
     buffer_map_[buffer_handle] = buffer;
 
     return buffer_handle;
-};
+}
 
 GPUState MetalExecutor::deallocate_buffer(const GPUBufferHandle &buffer_handle) {
     // Remove the reference to the command buffer - Metal will automatically deallocate resources
@@ -162,4 +190,42 @@ GPUState MetalExecutor::copy_from_device(std::span<std::byte> data_mem, const GP
 
     // Invalid buffer storage type - shouldn't trigger
     return GPUState::GPUFailure;
+}
+
+GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type) {
+    id<MTLCommandBuffer> compute_buffer = [command_queue_ commandBuffer];
+
+    // Prepare the compute encoder (binding GPU resources, providing compute pipeline, etc.)
+    id<MTLComputeCommandEncoder> compute_encoder;
+    if (dispatch_type == DispatchType::Serial) {
+        compute_encoder = [compute_buffer makeComputeCommandEncoder:MTLDispatchTypeSerial];
+    } else if (dispatch_type == DispatchType::Concurrent) {
+        compute_encoder = [compute_buffer makeComputeCommandEncoder:MTLDispatchTypeConcurrent];
+    } else {
+        return GPUState::InvalidDispatchType;
+    }
+
+    for (const KernelDispatch &kernel : kernels) {
+        // Fetch the compute pipeline or create it if needed
+        id<MTLComputePipelineState> compute_pipeline = find_cache_pipeline(kernel.kernel_name);
+
+        [compute_encoder setComputePipelineState:compute_pipeline];
+
+        for (int j = 0; j < kernel.buffer_handles.size(); ++j) {
+            [compute_encoder setBuffer:buffer_map_[kernel.buffer_handles[j]] offset:0 atIndex:j];
+        }
+
+        MTLSize groups_per_grid = MTLSizeMake(kernel.kernel_size[0], kernel.kernel_size[1], kernel.kernel_size[2]);
+        MTLSize threads_per_group = MTLSizeMake(8, 8, 1);
+        [compute_encoder dispatchThreadgroups:groups_per_grid threadsPerThreadgroup:threads_per_group];
+    }
+
+    [compute_encoder endEncoding];
+    [compute_buffer commit];
+
+    return GPUState::GPUSuccess;
+}
+
+GPUState MetalExecutor::execute_kernel(const KernelDispatch &kernel) {
+    return execute_batch({kernel}, DispatchType::Serial);
 }
