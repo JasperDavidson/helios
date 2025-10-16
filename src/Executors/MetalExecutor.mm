@@ -24,7 +24,7 @@ void MetalExecutor::load_default_library() {
     NSError *library_error = nil;
     id<MTLLibrary> library = [mtl_device_ newLibraryWithURL:library_url error:&library_error];
 
-    if (library_error != nil) {
+    if (library == nil) {
         std::string error_message = "Failed to fetch default kernel library. Description: ";
         error_message += [[library_error localizedDescription] UTF8String];
         throw std::runtime_error(error_message);
@@ -49,7 +49,7 @@ id<MTLComputePipelineState> MetalExecutor::find_cache_pipeline(const std::string
     NSError *pipeline_creation_error;
     id<MTLComputePipelineState> compute_pipeline =
         [mtl_device_ newComputePipelineStateWithFunction:kernel_func error:&pipeline_creation_error];
-    if (pipeline_creation_error != nil) {
+    if (compute_pipeline == nil) {
         std::string error_message = "Failed to create compute pipeline for the kernel function: " + kernel_name;
         error_message += [[pipeline_creation_error localizedDescription] UTF8String];
         throw std::runtime_error(error_message);
@@ -59,7 +59,7 @@ id<MTLComputePipelineState> MetalExecutor::find_cache_pipeline(const std::string
     return compute_pipeline;
 }
 
-void MetalExecutor::initialize() {
+MetalExecutor::MetalExecutor() : mtl_device_(MTLCreateSystemDefaultDevice()) {
     if (!mtl_device_) {
         throw std::runtime_error("Failed to get Metal device.");
     }
@@ -69,12 +69,9 @@ void MetalExecutor::initialize() {
     pipeline_map_ = std::unordered_map<std::string, id<MTLComputePipelineState>>();
 }
 
-MetalExecutor::MetalExecutor() : mtl_device_(MTLCreateSystemDefaultDevice()) { initialize(); }
-
-GPUBufferHandle MetalExecutor::allocate_buffer(std::uint32_t buffer_size, const BufferUsage &buffer_usage,
-                                               const MemoryHint &mem_hint) {
+GPUBufferHandle MetalExecutor::allocate_buffer(std::uint32_t buffer_size, const MemoryHint &mem_hint) {
     // Create the buffer handle object
-    GPUBufferHandle buffer_handle(buffer_counter, buffer_usage, mem_hint);
+    GPUBufferHandle buffer_handle(buffer_counter, mem_hint);
     buffer_counter++;
 
     // Create the buffer and map to its handle options:0 -> default storage option for the system (or private)
@@ -179,10 +176,9 @@ GPUState MetalExecutor::copy_from_device(std::span<std::byte> data_mem, const GP
         void *buffer_mem = [buffer contents];
         memcpy(data_mem.data(), buffer_mem, data_size);
     } else if (([buffer resourceOptions] & MTLResourceStorageModeShared) == MTLResourceStorageModeShared) {
-        id<MTLCommandBuffer> synchronize_cmd_buffer = [command_queue_ commandBuffer];
-
-        [synchronize_cmd_buffer commit];
-        [synchronize_cmd_buffer waitUntilCompleted];
+        // Inefficient synchronize() call? Needed to be *safe* since it ensures data is fully written to before reading
+        // Task scheduler might be able to optimize task placement such that this isn't a big deal
+        synchronize();
 
         void *buffer_mem = [buffer contents];
         memcpy(data_mem.data(), buffer_mem, data_size);
@@ -198,9 +194,9 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
     // Prepare the compute encoder (binding GPU resources, providing compute pipeline, etc.)
     id<MTLComputeCommandEncoder> compute_encoder;
     if (dispatch_type == DispatchType::Serial) {
-        compute_encoder = [compute_buffer makeComputeCommandEncoder:MTLDispatchTypeSerial];
+        compute_encoder = [compute_buffer computeCommandEncoderWithDispatchType:MTLDispatchTypeSerial];
     } else if (dispatch_type == DispatchType::Concurrent) {
-        compute_encoder = [compute_buffer makeComputeCommandEncoder:MTLDispatchTypeConcurrent];
+        compute_encoder = [compute_buffer computeCommandEncoderWithDispatchType:MTLDispatchTypeConcurrent];
     } else {
         return GPUState::InvalidDispatchType;
     }
@@ -211,12 +207,21 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
 
         [compute_encoder setComputePipelineState:compute_pipeline];
 
-        for (int j = 0; j < kernel.buffer_handles.size(); ++j) {
-            [compute_encoder setBuffer:buffer_map_[kernel.buffer_handles[j]] offset:0 atIndex:j];
+        for (int j = 0; j < kernel.buffer_bindings.size(); ++j) {
+            id<MTLBuffer> bind_buffer = buffer_map_[kernel.buffer_bindings[j].buffer_handle];
+            BufferUsage buffer_usage = kernel.buffer_bindings[j].buffer_usage;
+            MTLResourceUsage mtl_usage =
+                (buffer_usage == BufferUsage::ReadWrite) ? MTLResourceUsageWrite : MTLResourceUsageRead;
+
+            // Each buffer must be bound at a unique index
+            // Usage can be encoded based on how the kernel plans to use them --> potential reuse by future kernels
+            [compute_encoder useResource:bind_buffer usage:mtl_usage];
+            [compute_encoder setBuffer:bind_buffer offset:0 atIndex:j];
         }
 
         MTLSize groups_per_grid = MTLSizeMake(kernel.kernel_size[0], kernel.kernel_size[1], kernel.kernel_size[2]);
-        MTLSize threads_per_group = MTLSizeMake(8, 8, 1);
+        MTLSize threads_per_group =
+            MTLSizeMake(kernel.threads_per_group[0], kernel.threads_per_group[1], kernel.threads_per_group[2]);
         [compute_encoder dispatchThreadgroups:groups_per_grid threadsPerThreadgroup:threads_per_group];
     }
 
@@ -228,4 +233,14 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
 
 GPUState MetalExecutor::execute_kernel(const KernelDispatch &kernel) {
     return execute_batch({kernel}, DispatchType::Serial);
+}
+
+// Add a final empty command buffer and block until it finishes
+GPUState MetalExecutor::synchronize() {
+    id<MTLCommandBuffer> synchronize_buffer = [command_queue_ commandBuffer];
+
+    [synchronize_buffer commit];
+    [synchronize_buffer waitUntilCompleted];
+
+    return GPUState::GPUSuccess;
 }

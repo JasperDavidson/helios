@@ -17,8 +17,7 @@ class MetalExecutor : public IGPUExecutor {
   public:
     MetalExecutor();
 
-    GPUBufferHandle allocate_buffer(std::uint32_t buffer_size, const BufferUsage &buffer_usage,
-                                    const MemoryHint &mem_hint) override;
+    GPUBufferHandle allocate_buffer(std::uint32_t buffer_size, const MemoryHint &mem_hint) override;
     GPUState deallocate_buffer(const GPUBufferHandle &buffer_handle) override;
 
     GPUState copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
@@ -45,7 +44,6 @@ class MetalExecutor : public IGPUExecutor {
     int buffer_counter = 0;
     std::unordered_map<GPUBufferHandle, id<MTLBuffer>> buffer_map_;
 
-    void initialize();
     void load_default_library();
     id<MTLComputePipelineState> find_cache_pipeline(const std::string &kernel_name);
 };

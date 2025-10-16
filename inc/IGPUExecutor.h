@@ -7,25 +7,31 @@
 enum class GPUState { GPUSuccess, GPUFailure, GhostBuffer, InvalidDispatchType };
 
 // Various states that can affect the level of optimization applied to memory buffers
+// BufferUsage - How the buffer will be accessed in the global system
 enum class BufferUsage { ReadWrite, ReadOnly };
 enum class MemoryHint { DeviceLocal, HostVisible };
 
 class GPUBufferHandle {
   public:
     int ID;
-    BufferUsage buffer_usage;
+    // TODO: Why do we have both BufferUsage and GPU State now???? --> consolidate to one
     MemoryHint mem_hint;
 
-    GPUBufferHandle(int ID, BufferUsage buffer_usage, MemoryHint mem_hint)
-        : ID(ID), buffer_usage(buffer_usage), mem_hint(mem_hint) {};
+    GPUBufferHandle(int ID, MemoryHint mem_hint) : ID(ID), mem_hint(mem_hint) {};
 };
 
-// Encapsulate information about kernels
+// Encapsulate information about buffers and kernels
+struct BufferBinding {
+    GPUBufferHandle buffer_handle;
+    BufferUsage buffer_usage;
+};
+
 class KernelDispatch {
   public:
     std::string kernel_name;
-    std::vector<GPUBufferHandle> buffer_handles;
+    std::vector<BufferBinding> buffer_bindings;
     std::vector<int> kernel_size;
+    std::vector<int> threads_per_group;
 };
 
 enum class DispatchType { Serial, Concurrent };
@@ -33,8 +39,7 @@ enum class DispatchType { Serial, Concurrent };
 class IGPUExecutor {
   public:
     // Allocating/freeing buffer memory on the GPU for kernel tasks
-    GPUBufferHandle virtual allocate_buffer(std::uint32_t buffer_size, const BufferUsage &buffer_usage,
-                                            const MemoryHint &mem_hint) = 0;
+    GPUBufferHandle virtual allocate_buffer(std::uint32_t buffer_size, const MemoryHint &mem_hint) = 0;
     GPUState virtual deallocate_buffer(const GPUBufferHandle &buffer_handle) = 0;
 
     // Sending memory between devices for task completion/after task completion
