@@ -1,6 +1,9 @@
 #ifndef DATA_HANDLE_H
 #define DATA_HANDLE_H
 
+#include <any>
+#include <unordered_map>
+
 // BaseDataHandle provides the ID needed for the runtime map
 class BaseDataHandle {
   public:
@@ -16,4 +19,13 @@ template <typename T> class DataHandle : public BaseDataHandle {
     DataHandle(int ID) : BaseDataHandle(ID) {};
 };
 
-#endif DATA_HANDLE_H
+// DataManager object allows for caching of DataHandles to their actual objects
+class DataManager {
+  public:
+    template <typename T> T get_data(DataHandle<T> data_handle) { return data_manager[data_handle.ID]; }
+
+  private:
+    std::unordered_map<int, std::any> data_manager;
+};
+
+#endif
