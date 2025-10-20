@@ -1,6 +1,7 @@
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
+#include "DataManager.h"
 #include "IGPUExecutor.h"
 #include "Tasks.h"
 #include "ThreadPool.h"
@@ -14,6 +15,7 @@ class Scheduler {
     void visit(const GPUTask &gpu_task);
 
   private:
+    DataManager data_manager;
     std::shared_ptr<ThreadPool> thread_pool;
     std::shared_ptr<IGPUExecutor> gpu_executor;
 };

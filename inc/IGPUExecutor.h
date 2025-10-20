@@ -14,13 +14,14 @@ enum class MemoryHint { DeviceLocal, HostVisible };
 class GPUBufferHandle {
   public:
     int ID;
-    // TODO: Why do we have both BufferUsage and GPU State now???? --> consolidate to one
     MemoryHint mem_hint;
 
     GPUBufferHandle(int ID, MemoryHint mem_hint) : ID(ID), mem_hint(mem_hint) {};
 };
 
 // Encapsulate information about buffers and kernels
+
+// Separate so that buffer handles can be reused across kernels
 struct BufferBinding {
     GPUBufferHandle buffer_handle;
     BufferUsage buffer_usage;
@@ -54,6 +55,9 @@ class IGPUExecutor {
     // Prevents more GPU tasks from being added until all current ones are
     // complete
     GPUState virtual synchronize() = 0;
+
+    // Allows for checking of buffer sizes without access to device specific buffer maps
+    virtual int get_buffer_length(const GPUBufferHandle &buffer_handle) = 0;
 
     virtual ~IGPUExecutor() = default;
 };

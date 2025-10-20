@@ -30,18 +30,21 @@ class MetalExecutor : public IGPUExecutor {
 
     GPUState synchronize() override;
 
+    int get_buffer_length(const GPUBufferHandle &buffer_handle) override;
+
   private:
     static constexpr NSString *const LIBRARY_NAME = @"kernels";
+    int buffer_counter = 0;
 
     // Metal specific variables
     id<MTLDevice> mtl_device_;
     id<MTLCommandQueue> command_queue_;
     id<MTLLibrary> mtl_library_;
 
-    // Hashmap for storing already prepared compute pipelines
+    // map for storing already prepared compute pipelines
     std::unordered_map<std::string, id<MTLComputePipelineState>> pipeline_map_;
-    // Hashmap for storing GPU buffer handles
-    int buffer_counter = 0;
+
+    // map for storing GPU buffer handles
     std::unordered_map<GPUBufferHandle, id<MTLBuffer>> buffer_map_;
 
     void load_default_library();

@@ -36,7 +36,7 @@ template <typename F, class... Types> class CPUTask : public ITask {
             const std::vector<std::shared_ptr<BaseDataHandle>> &outputs, const DataManager &data_manager, F &&task,
             Types &&...args)
         : ITask(ID, task_name, inputs, outputs) {
-        // Two key things
+        // Three key things
         // 1. Work lambda to fetch data and run method
         // 2. Wrap that lambda in a packaged task that the scheduler can execute
         // 3. Include the packaged tasks' future so that the scheduler can tell when the task is done
@@ -62,11 +62,17 @@ template <typename F, class... Types> class CPUTask : public ITask {
 class GPUTask : public ITask {
   public:
     GPUTask(int ID, const std::string &task_name, const std::vector<std::shared_ptr<BaseDataHandle>> &inputs,
-            const std::vector<std::shared_ptr<BaseDataHandle>> &outputs)
-        : ITask(ID, task_name, inputs, outputs) {};
+            const std::vector<BufferUsage> &buffer_usages, const std::vector<std::shared_ptr<BaseDataHandle>> &outputs,
+            const std::vector<int> &kernel_size, const std::vector<int> &threads_per_group)
+        : ITask(ID, task_name, inputs, outputs), kernel_size(kernel_size), threads_per_group(threads_per_group),
+          buffer_usages(buffer_usages) {};
+
+    std::vector<int> kernel_size;
+    std::vector<int> threads_per_group;
+    std::vector<BufferUsage> buffer_usages;
 
   private:
-    KernelDispatch task_kernel;
+    void accept(const Scheduler &scheduler) override;
 };
 
 class TaskGraph {

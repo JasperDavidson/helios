@@ -208,6 +208,7 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
         [compute_encoder setComputePipelineState:compute_pipeline];
 
         for (int j = 0; j < kernel.buffer_bindings.size(); ++j) {
+            // TODO: Handle if buffer is not in the map (invalid buffer, NEVER ALLOCATED)
             id<MTLBuffer> bind_buffer = buffer_map_[kernel.buffer_bindings[j].buffer_handle];
             BufferUsage buffer_usage = kernel.buffer_bindings[j].buffer_usage;
             MTLResourceUsage mtl_usage =
@@ -243,4 +244,8 @@ GPUState MetalExecutor::synchronize() {
     [synchronize_buffer waitUntilCompleted];
 
     return GPUState::GPUSuccess;
+}
+
+int MetalExecutor::get_buffer_length(const GPUBufferHandle &buffer_handle) {
+    return [buffer_map[buffer_handle] length];
 }

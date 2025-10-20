@@ -18,6 +18,7 @@ class Runtime {
     std::shared_ptr<BaseDataHandle> commit_graph(const TaskGraph &task_graph);
 
   private:
+    DataManager data_manager;
     std::shared_ptr<ThreadPool> thread_pool;
     std::shared_ptr<IGPUExecutor> gpu_exec;
 };
