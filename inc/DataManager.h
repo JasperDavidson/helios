@@ -1,6 +1,7 @@
 #ifndef DATA_HANDLE_H
 #define DATA_HANDLE_H
 
+#include "IGPUExecutor.h"
 #include <any>
 #include <unordered_map>
 
@@ -22,15 +23,24 @@ template <typename T> class DataHandle : public BaseDataHandle {
 struct DataEntry {
     std::any data;
     size_t byte_size;
+    MemoryHint mem_hint;
+
+    // Generic getter for accessing raw memory
+    std::function<std::span<const std::byte>()> raw_data_accessor;
 };
 
 // DataManager object allows for caching of DataHandles to their actual objects
 class DataManager {
   public:
-    template <typename T> T get_data(DataHandle<T> data_handle) { return data_map[data_handle.ID]; }
-    template <typename T> DataHandle<T> create_data_handle(T data);
+    template <typename T> T get_data(DataHandle<T> data_handle) {
+        // Dereferencing the shared pointer and casting to the type to access the data
+        return std::any_cast<T>(*data_map[data_handle.ID].data);
+    }
+    template <typename T> DataHandle<T> create_data_handle(T &data, const MemoryHint &mem_hint);
 
+    std::span<const std::byte> get_data_span(int ID) { return data_map[ID].raw_data_accessor(); };
     int get_data_length(int ID) { return data_map[ID].byte_size; };
+    MemoryHint get_mem_hint(int ID) { return data_map[ID].mem_hint; };
 
   private:
     std::unordered_map<int, DataEntry> data_map;
