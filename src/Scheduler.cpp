@@ -2,35 +2,41 @@
 #include "DataManager.h"
 #include "IGPUExecutor.h"
 #include "Tasks.h"
+#include <algorithm>
+#include <map>
 
 void Scheduler::visit(const GPUTask &gpu_task) {
     // 1. Figure out if appropriate buffer space already exists on the GPU; if not create it
     // - This allows for reusing buffers from previous kernels, saving resources
 
     std::vector<GPUBufferHandle> buffers_not_in_use; //  = someAlgorithmToDetermineBuffersNotInUse
+    std::multimap<int, GPUBufferHandle> size_to_buffer;
+
+    // Use multimap for better effiency when searching for unused buffers
+    std::ranges::for_each_result(&buffers_not_in_use, [&](const GPUBufferHandle &buffer_handle) {
+        size_to_buffer.emplace(data_manager.get_data_length(buffer_handle.ID), buffer_handle);
+    });
+
     std::vector<BufferBinding> buffer_bindings;
-    // Use ascended sort so smallest possible buffers are used first
-    // std::sort(buffers_not_in_use.begin(), buffers_not_in_use.end());
     for (int i = 0; i < gpu_task.inputs.size(); ++i) {
         size_t input_data_size = data_manager.get_data_length(gpu_task.inputs[i]->ID);
+        MemoryHint data_mem_hint = data_manager.get_mem_hint(gpu_task.inputs[i]->ID);
+        auto input_data = data_manager.get_data_span(gpu_task.inputs[i]->ID);
 
-        for (auto it = buffers_not_in_use.begin(); it != buffers_not_in_use.end();) {
-            if (buffers_not_in_use.empty()) {
-                break;
-            }
+        auto potential_buffer = size_to_buffer.lower_bound(input_data_size);
 
-            size_t unused_buffer_size = data_manager.get_data_length(it->ID);
-            if (input_data_size <= unused_buffer_size) {
-                // TODO: Need some way for the scheduler to include a memory hint for the buffer
-                buffer_bindings.push_back(BufferBinding(*it, gpu_task.buffer_usages[i]));
-                // TODO: How will we access the data mem?
-                gpu_executor->copy_to_device(std::span<const std::byte> data_mem, *it, input_data_size);
-                buffers_not_in_use.erase(it);
-            }
+        if (potential_buffer != size_to_buffer.end()) {
+            potential_buffer->second.mem_hint = data_mem_hint;
+            buffer_bindings.push_back(BufferBinding(potential_buffer->second, gpu_task.buffer_usages[i]));
+            gpu_executor->copy_to_device(input_data, potential_buffer->second, input_data_size);
+            size_to_buffer.erase(potential_buffer);
+        } else {
+            GPUBufferHandle new_buffer = gpu_executor->allocate_buffer(input_data_size, data_mem_hint);
+            gpu_executor->copy_to_device(input_data, new_buffer, input_data_size);
         }
-
-        // TODO: If not suitable buffer is found for reuse
     }
 
-    // Assemble the kernel dispatch for the kernel and assign it to the GPU
+    // Assemble the kernel dispatch and assign it to the GPU
+    KernelDispatch kernel(gpu_task.task_name, buffer_bindings, gpu_task.kernel_size, gpu_task.threads_per_group);
+    gpu_executor->execute_kernel(kernel);
 }
