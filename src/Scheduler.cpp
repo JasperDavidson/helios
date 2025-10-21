@@ -13,7 +13,7 @@ void Scheduler::visit(const GPUTask &gpu_task) {
     std::multimap<int, GPUBufferHandle> size_to_buffer;
 
     // Use multimap for better effiency when searching for unused buffers
-    std::ranges::for_each_result(&buffers_not_in_use, [&](const GPUBufferHandle &buffer_handle) {
+    std::ranges::for_each(buffers_not_in_use, [&](const GPUBufferHandle &buffer_handle) {
         size_to_buffer.emplace(data_manager.get_data_length(buffer_handle.ID), buffer_handle);
     });
 
