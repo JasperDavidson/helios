@@ -247,5 +247,5 @@ GPUState MetalExecutor::synchronize() {
 }
 
 int MetalExecutor::get_buffer_length(const GPUBufferHandle &buffer_handle) {
-    return [buffer_map[buffer_handle] length];
+    return [buffer_map_[buffer_handle] length];
 }

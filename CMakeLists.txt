@@ -7,20 +7,28 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_library(Helios_Core STATIC src/DataManager.cpp src/Tasks.cpp)
 target_include_directories(Helios_Core PUBLIC inc)
 
-add_library(Helios_ThreadPool STATIC src/ThreadPool.cpp)
+add_library(Helios_ThreadPool STATIC src/ThreadPool/ThreadPool.cpp)
 target_include_directories(Helios_ThreadPool PUBLIC inc)
 target_link_libraries(Helios_ThreadPool PUBLIC Helios_Core)
 
 if(APPLE)
-	set(SHADER_SOURCE ${CMAKE_SOURCE_DIR}/src/MetalTest/kernels.metal)
-	set(METALLIB_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernels.metallib)
+	set(SHADER_SOURCE ${CMAKE_SOURCE_DIR}/src/MetalTest/test_kernel.metal)
+	set(SHADER_IR ${CMAKE_SOURCE_DIR}/src/MetalTest/test_kernel.air)
+	set(METALLIB_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/test_kernel.metallib)
 
-	# Creating the metal shaders
+	# Converting metal shaders to IR
+	add_custom_command(
+		OUTPUT ${SHADER_IR}
+		COMMAND xcrun -sdk macosx metal -c ${SHADER_SOURCE} -o ${SHADER_IR}
+		DEPENDS ${SHADER_IR}
+		COMMENT "Converting from kernel code to IR"
+	)
+	add_custom_target(ir_shaders DEPENDS ${SHADER_IR})
 
 	# Create the metal executable and link it with the .metallib dependency
 	add_custom_command(
-		OUPUT ${METALLIB_OUTPUT}
-		COMMAND xcrun -sdk macosx metal -c ${SHADER_SOURCE} -o ${METALLIB_OUTPUT}
+		OUTPUT ${METALLIB_OUTPUT}
+		COMMAND xcrun -sdk macosx metallib -c ${SHADER_IR} -o ${METALLIB_OUTPUT}
 		DEPENDS ${SHADER_SOURCE}
 		COMMENT "Compiling metal shaders"
 	)
@@ -32,27 +40,21 @@ if(APPLE)
 	target_link_libraries(Helios_MetalExecutor PUBLIC Helios_Core)
 	add_dependencies(Helios_MetalExecutor compile_shaders)
 
-	add_executable(metal_exec src/Executors/MetalExecutor.mm)
-	set_property(TARGET metal_exec PROPERTY LANGUAGE OBJCXX)
-	target_compile_options(metal_exec PRIVATE -F${CMAKE_OSX_SYSROOT}/System/Library/Frameworks)
-	target_include_directories(metal_exec PUBLIC inc)
-	add_dependencies(metal_exec compile_shaders)
-
 	# Link the Metal and Foundation libraries
-	find_library(METAL_FRAMEWORK Metal Required)
-	find_library(FOUNDATION_FRAMEWORK Foundation)
+	find_library(METAL_FRAMEWORK Metal REQUIRED)
+	find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
 
-	target_link_libraries(Helios_MetalExecutor
+	target_link_libraries(
+	    Helios_MetalExecutor
 	    PRIVATE
 	    ${METAL_FRAMEWORK}
 	    ${FOUNDATION_FRAMEWORK}
-	    objc
 	)
 endif()
 
 add_library(Helios_Engine STATIC src/Scheduler.cpp)
 target_include_directories(Helios_Engine PUBLIC inc)
-target_link_libraries(Helios_Engine PUBLIC Helios_Core Helios_ThreadPool Helios_MetalExecutor)
+target_link_libraries(Helios_Engine PUBLIC Helios_Core Helios_ThreadPool)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -72,16 +74,3 @@ target_link_libraries(
 
 include(GoogleTest)
 gtest_discover_tests(pool_test)
-
-if (APPLE)
-	add_executable(metal_test tests/metal_executor_tests.mm)
-	target_include_directories(metal_test PUBLIC inc)
-
-	target_link_libraries(
-	  metal_test
-	  Helios_MetalExecutor
-	  GTest::gtest_main
-	)
-
-	include(GoogleTest)
-	gtest_discover_tests(metal_test)

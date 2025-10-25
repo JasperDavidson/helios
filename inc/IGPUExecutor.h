@@ -1,6 +1,7 @@
 #ifndef IGPU_H
 #define IGPU_H
 
+#include <functional>
 #include <span>
 
 // TODO: Add more options as interface is built out
@@ -17,7 +18,17 @@ class GPUBufferHandle {
     MemoryHint mem_hint;
 
     GPUBufferHandle(int ID, MemoryHint mem_hint) : ID(ID), mem_hint(mem_hint) {};
+    bool operator==(const GPUBufferHandle &other) const { return this->ID == other.ID; }
 };
+
+// GPUBufferHandle objects have effective hashes already since they store a unique ID
+namespace std {
+template <> struct std::hash<GPUBufferHandle> {
+    std::size_t operator()(const GPUBufferHandle &buffer_handle) const noexcept {
+        return std::hash<int>{}(buffer_handle.ID);
+    }
+};
+} // namespace std
 
 // Encapsulate information about buffers and kernels
 

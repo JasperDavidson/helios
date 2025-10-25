@@ -32,15 +32,15 @@ struct DataEntry {
 // DataManager object allows for caching of DataHandles to their actual objects
 class DataManager {
   public:
-    template <typename T> T get_data(DataHandle<T> data_handle) {
+    template <typename T> T get_data(DataHandle<T> data_handle) const {
         // Dereferencing the shared pointer and casting to the type to access the data
         return std::any_cast<T>(*data_map[data_handle.ID].data);
     }
     template <typename T> DataHandle<T> create_data_handle(T &data, const MemoryHint &mem_hint);
 
-    std::span<const std::byte> get_data_span(int ID) { return data_map[ID].raw_data_accessor(); };
-    int get_data_length(int ID) { return data_map[ID].byte_size; };
-    MemoryHint get_mem_hint(int ID) { return data_map[ID].mem_hint; };
+    std::span<const std::byte> get_data_span(int ID) const { return data_map.at(ID).raw_data_accessor(); };
+    int get_data_length(int ID) const { return data_map.at(ID).byte_size; };
+    MemoryHint get_mem_hint(int ID) const { return data_map.at(ID).mem_hint; };
 
   private:
     std::unordered_map<int, DataEntry> data_map;

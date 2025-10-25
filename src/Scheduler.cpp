@@ -5,14 +5,13 @@
 #include <algorithm>
 #include <map>
 
-void Scheduler::visit(const GPUTask &gpu_task) {
-    // 1. Figure out if appropriate buffer space already exists on the GPU; if not create it
+void Scheduler::visit(const GPUTask &gpu_task) const {
+    // Figure out if appropriate buffer space already exists on the GPU; if not create it
     // - This allows for reusing buffers from previous kernels, saving resources
-
     std::vector<GPUBufferHandle> buffers_not_in_use; //  = someAlgorithmToDetermineBuffersNotInUse
     std::multimap<int, GPUBufferHandle> size_to_buffer;
 
-    // Use multimap for better effiency when searching for unused buffers
+    // Use multimap for better efficiency when searching for unused buffers
     std::ranges::for_each(buffers_not_in_use, [&](const GPUBufferHandle &buffer_handle) {
         size_to_buffer.emplace(data_manager.get_data_length(buffer_handle.ID), buffer_handle);
     });
