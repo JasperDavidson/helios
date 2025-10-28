@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <span>
+#include <unordered_map>
 
 // TODO: Add more options as interface is built out
 enum class GPUState { GPUSuccess, GPUFailure, GhostBuffer, InvalidDispatchType };
@@ -44,7 +45,17 @@ class KernelDispatch {
     std::vector<BufferBinding> buffer_bindings;
     std::vector<int> kernel_size;
     std::vector<int> threads_per_group;
+
+    bool operator==(const KernelDispatch &other) const { return this->kernel_name == other.kernel_name; };
 };
+
+namespace std {
+template <> struct std::hash<KernelDispatch> {
+    std::size_t operator()(const KernelDispatch &kernel_dispatch) const noexcept {
+        return std::hash<std::string>{}(kernel_dispatch.kernel_name);
+    }
+};
+} // namespace std
 
 enum class DispatchType { Serial, Concurrent };
 
@@ -71,6 +82,9 @@ class IGPUExecutor {
     virtual int get_buffer_length(const GPUBufferHandle &buffer_handle) = 0;
 
     virtual ~IGPUExecutor() = default;
+
+    // Allows for the scheduler to check the status of kernels it has dispatched
+    std::unordered_map<KernelDispatch, bool> kernel_status;
 };
 
 #endif

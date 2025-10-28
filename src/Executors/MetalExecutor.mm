@@ -226,6 +226,11 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
         [compute_encoder dispatchThreadgroups:groups_per_grid threadsPerThreadgroup:threads_per_group];
     }
 
+    // TODO: Add completion status to compute buffer and how to manage it when parallel kernels are submitted but some
+    // may end early
+    [compute_buffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull){
+        kernel_status[]}];
+
     [compute_encoder endEncoding];
     [compute_buffer commit];
 

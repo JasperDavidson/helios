@@ -107,7 +107,8 @@ class TaskGraph {
     TaskGraph();
 
     void add_task(std::shared_ptr<ITask> task);
-    void find_roots();
+    std::vector<int> find_ready() const;
+    std::vector<int> find_non_ready() const;
     void validate_graph();
 
   private:
@@ -116,8 +117,6 @@ class TaskGraph {
     std::unordered_map<int, std::vector<int>> dependents_;
     std::unordered_map<int, int> data_producer_map_;
     std::unordered_map<int, std::vector<int>> unfulfilled_data_;
-
-    std::vector<int> root_nodes_;
 };
 
 #endif

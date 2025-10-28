@@ -1,7 +1,9 @@
 #include "Tasks.h"
 #include "Scheduler.h"
+#include <algorithm>
+#include <deque>
 #include <stdexcept>
-#include <unordered_set>
+#include <unordered_map>
 
 template <typename F, class... Types> void CPUTask<F, Types...>::accept(const Scheduler &scheduler) {
     scheduler.visit(*this);
@@ -45,13 +47,28 @@ void TaskGraph::add_task(std::shared_ptr<ITask> task) {
     }
 }
 
-void TaskGraph::find_roots() {
+std::vector<int> TaskGraph::find_ready() const {
+    std::vector<int> ready_nodes;
     for (auto task_dependencies = dependencies_.begin(); task_dependencies != dependencies_.end();
          ++task_dependencies) {
         if (task_dependencies->second.empty()) {
-            root_nodes_.push_back(task_dependencies->first);
+            ready_nodes.push_back(task_dependencies->first);
         }
     }
+
+    return ready_nodes;
+}
+
+std::vector<int> TaskGraph::find_non_ready() const {
+    std::vector<int> not_ready_nodes;
+    for (auto task_dependencies = dependencies_.begin(); task_dependencies != dependencies_.end();
+         ++task_dependencies) {
+        if (!task_dependencies->second.empty()) {
+            not_ready_nodes.push_back(task_dependencies->first);
+        }
+    }
+
+    return not_ready_nodes;
 }
 
 void TaskGraph::validate_graph() {
@@ -60,7 +77,33 @@ void TaskGraph::validate_graph() {
         // TODO: Refactor to pass back more information about what data was unfulfilled
         throw std::runtime_error("Failed to validate task graph: Data Unfulfillment error");
     }
-    find_roots();
+    std::vector<int> root_nodes = find_ready();
 
     // Check for cycles utilizing topological sort
+    std::deque<int> task_queue(root_nodes.begin(), root_nodes.end());
+    std::vector<int> ordering;
+    std::unordered_map<int, int> indegree_map;
+    for (auto dependent_iter = dependents_.begin(); dependent_iter != dependents_.end(); ++dependent_iter) {
+        indegree_map[dependent_iter->first] = dependent_iter->second.size();
+    }
+
+    while (!task_queue.empty()) {
+        int cur_task = task_queue.front();
+        task_queue.pop_front();
+        ordering.push_back(cur_task);
+
+        for (int dependent : dependents_[cur_task]) {
+            indegree_map[dependent] -= 1;
+        }
+
+        for (auto indegree_iter = indegree_map.begin(); indegree_iter != indegree_map.end(); ++indegree_iter) {
+            if (indegree_iter->second == 0) {
+                task_queue.push_back(indegree_iter->first);
+            }
+        }
+    }
+
+    if (task_queue.size() != all_tasks_.size()) {
+        std::runtime_error("Failed to validate task graph: Cyclic task dependency detected");
+    }
 }

@@ -3,6 +3,7 @@
 #include "IGPUExecutor.h"
 #include "Tasks.h"
 #include <algorithm>
+#include <future>
 #include <map>
 
 void Scheduler::visit(const GPUTask &gpu_task) const {
@@ -38,4 +39,18 @@ void Scheduler::visit(const GPUTask &gpu_task) const {
     // Assemble the kernel dispatch and assign it to the GPU
     KernelDispatch kernel(gpu_task.task_name, buffer_bindings, gpu_task.kernel_size, gpu_task.threads_per_group);
     gpu_executor->execute_kernel(kernel);
+}
+
+/*
+ * Maintains state of currently running tasks, tasks that are ready to be ran, and tasks that need dependencies met
+ * Cycles through the following until all tasks are completed:
+ *  1. Check all inert tasks and see if their dependencies have been met (if so add to ready_tasks)
+ *  2. Check all ready tasks and attempt to schedule on CPU/GPU if appropriate resources
+ *  3. Check all running tasks and see if they have completed (if so remove them as dependencies)
+ */
+void Scheduler::execute_graph(const TaskGraph &task_graph) {
+    // Tasks that have their dependencies met but aren't currently running
+    std::vector<int> ready_tasks = task_graph.find_ready();
+    // Tasks that are currently running and need to be checked for completion
+    std::future<void> running_tasks;
 }

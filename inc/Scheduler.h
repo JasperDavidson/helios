@@ -14,6 +14,8 @@ class Scheduler {
     };
     void visit(const GPUTask &gpu_task) const;
 
+    void execute_graph(const TaskGraph &task_graph);
+
   private:
     DataManager data_manager;
     std::shared_ptr<ThreadPool> thread_pool;
