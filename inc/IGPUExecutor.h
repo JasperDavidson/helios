@@ -2,6 +2,7 @@
 #define IGPU_H
 
 #include <functional>
+#include <future>
 #include <span>
 #include <unordered_map>
 
@@ -83,8 +84,8 @@ class IGPUExecutor {
 
     virtual ~IGPUExecutor() = default;
 
-    // Allows for the scheduler to check the status of kernels it has dispatched
-    std::unordered_map<KernelDispatch, bool> kernel_status;
+    // Allows for the scheduler to check the status of kernels it has dispatched (kernel name -> future promise)
+    std::unordered_map<std::string, std::promise<bool>> kernel_status;
 };
 
 #endif

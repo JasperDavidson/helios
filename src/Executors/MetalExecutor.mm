@@ -189,19 +189,20 @@ GPUState MetalExecutor::copy_from_device(std::span<std::byte> data_mem, const GP
 }
 
 GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type) {
-    id<MTLCommandBuffer> compute_buffer = [command_queue_ commandBuffer];
-
-    // Prepare the compute encoder (binding GPU resources, providing compute pipeline, etc.)
-    id<MTLComputeCommandEncoder> compute_encoder;
-    if (dispatch_type == DispatchType::Serial) {
-        compute_encoder = [compute_buffer computeCommandEncoderWithDispatchType:MTLDispatchTypeSerial];
-    } else if (dispatch_type == DispatchType::Concurrent) {
-        compute_encoder = [compute_buffer computeCommandEncoderWithDispatchType:MTLDispatchTypeConcurrent];
-    } else {
-        return GPUState::InvalidDispatchType;
-    }
-
     for (const KernelDispatch &kernel : kernels) {
+        // Construct a buffer for each kernel, needed to allow for end commands for individual kernel completion
+        id<MTLCommandBuffer> compute_buffer = [command_queue_ commandBuffer];
+
+        // Prepare the compute encoder (binding GPU resources, providing compute pipeline, etc.)
+        id<MTLComputeCommandEncoder> compute_encoder;
+        if (dispatch_type == DispatchType::Serial) {
+            compute_encoder = [compute_buffer computeCommandEncoderWithDispatchType:MTLDispatchTypeSerial];
+        } else if (dispatch_type == DispatchType::Concurrent) {
+            compute_encoder = [compute_buffer computeCommandEncoderWithDispatchType:MTLDispatchTypeConcurrent];
+        } else {
+            return GPUState::InvalidDispatchType;
+        }
+
         // Fetch the compute pipeline or create it if needed
         id<MTLComputePipelineState> compute_pipeline = find_cache_pipeline(kernel.kernel_name);
 
@@ -224,15 +225,14 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
         MTLSize threads_per_group =
             MTLSizeMake(kernel.threads_per_group[0], kernel.threads_per_group[1], kernel.threads_per_group[2]);
         [compute_encoder dispatchThreadgroups:groups_per_grid threadsPerThreadgroup:threads_per_group];
+
+        [compute_buffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
+          kernel_status[kernel.kernel_name].set_value(true);
+        }];
+
+        [compute_encoder endEncoding];
+        [compute_buffer commit];
     }
-
-    // TODO: Add completion status to compute buffer and how to manage it when parallel kernels are submitted but some
-    // may end early
-    [compute_buffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull){
-        kernel_status[]}];
-
-    [compute_encoder endEncoding];
-    [compute_buffer commit];
 
     return GPUState::GPUSuccess;
 }

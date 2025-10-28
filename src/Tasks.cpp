@@ -59,16 +59,13 @@ std::vector<int> TaskGraph::find_ready() const {
     return ready_nodes;
 }
 
-std::vector<int> TaskGraph::find_non_ready() const {
-    std::vector<int> not_ready_nodes;
-    for (auto task_dependencies = dependencies_.begin(); task_dependencies != dependencies_.end();
-         ++task_dependencies) {
-        if (!task_dependencies->second.empty()) {
-            not_ready_nodes.push_back(task_dependencies->first);
-        }
+std::vector<int> TaskGraph::get_task_ids() const {
+    std::vector<int> task_ids;
+    for (auto task_iter = all_tasks_.begin(); task_iter != all_tasks_.end(); ++task_iter) {
+        task_ids.push_back(task_iter->first);
     }
 
-    return not_ready_nodes;
+    return task_ids;
 }
 
 void TaskGraph::validate_graph() {

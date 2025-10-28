@@ -52,7 +52,7 @@ if(APPLE)
 	)
 endif()
 
-add_library(Helios_Engine STATIC src/Scheduler.cpp)
+add_library(Helios_Engine STATIC src/Scheduler.cpp src/Runtime.cpp)
 target_include_directories(Helios_Engine PUBLIC inc)
 target_link_libraries(Helios_Engine PUBLIC Helios_Core Helios_ThreadPool)
 

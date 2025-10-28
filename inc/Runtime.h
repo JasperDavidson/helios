@@ -6,6 +6,13 @@
 #include "Tasks.h"
 #include "ThreadPool.h"
 
+enum class TaskState { Pending, Ready, Running, Complete };
+
+struct TaskRuntimeState {
+    TaskState state;
+    int num_dependencies;
+};
+
 /*
  * The Runtime is the owners of all the system resources
  * It coordinates data handling and creating schedulers

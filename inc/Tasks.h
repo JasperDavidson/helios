@@ -5,6 +5,7 @@
 #include "IGPUExecutor.h"
 #include <functional>
 #include <future>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -53,6 +54,8 @@ template <typename F, class... Types> class CPUTask : public ITask {
         task_future = task_package->get_future();
         task_lambda = [task_package]() { (*task_package)(); };
     };
+
+    bool task_complete() const { return task_future.wait_for(0) == std::future_status::ready; };
 
   private:
     std::future<std::invoke_result<F, Types...>> task_future;
@@ -108,8 +111,12 @@ class TaskGraph {
 
     void add_task(std::shared_ptr<ITask> task);
     std::vector<int> find_ready() const;
-    std::vector<int> find_non_ready() const;
     void validate_graph();
+
+    std::vector<int> get_task_ids() const;
+    std::shared_ptr<ITask> get_task(int task_id) const { return all_tasks_.at(task_id); };
+    std::vector<int> get_dependents(int task_id) const { return dependents_.at(task_id); };
+    std::vector<int> get_dependencies(int task_id) const { return dependencies_.at(task_id); };
 
   private:
     std::unordered_map<int, std::shared_ptr<ITask>> all_tasks_;
