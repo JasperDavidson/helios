@@ -1,6 +1,7 @@
 #include "Tasks.h"
 #include "Scheduler.h"
 #include <stdexcept>
+#include <unordered_set>
 
 template <typename F, class... Types> void CPUTask<F, Types...>::accept(const Scheduler &scheduler) {
     scheduler.visit(*this);
@@ -42,4 +43,24 @@ void TaskGraph::add_task(std::shared_ptr<ITask> task) {
             unfulfilled_data_.erase(input_handle->ID);
         }
     }
+}
+
+void TaskGraph::find_roots() {
+    for (auto task_dependencies = dependencies_.begin(); task_dependencies != dependencies_.end();
+         ++task_dependencies) {
+        if (task_dependencies->second.empty()) {
+            root_nodes_.push_back(task_dependencies->first);
+        }
+    }
+}
+
+void TaskGraph::validate_graph() {
+    bool no_unfulfilled_data = unfulfilled_data_.empty();
+    if (unfulfilled_data_.empty()) {
+        // TODO: Refactor to pass back more information about what data was unfulfilled
+        throw std::runtime_error("Failed to validate task graph: Data Unfulfillment error");
+    }
+    find_roots();
+
+    // Check for cycles utilizing topological sort
 }

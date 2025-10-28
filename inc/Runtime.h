@@ -12,8 +12,9 @@
  */
 class Runtime {
   public:
-    // Should return a future of the final result?
-    std::shared_ptr<BaseDataHandle> commit_graph(const TaskGraph &task_graph);
+    // Returns a future so that user can wait for the graph to complete when needed
+    // Immediately communicatoes with the scheduler to begin executing tasks
+    std::future<void> commit_graph(TaskGraph &task_graph);
 
   private:
     DataManager data_manager;
