@@ -226,8 +226,9 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
             MTLSizeMake(kernel.threads_per_group[0], kernel.threads_per_group[1], kernel.threads_per_group[2]);
         [compute_encoder dispatchThreadgroups:groups_per_grid threadsPerThreadgroup:threads_per_group];
 
+        // Update when each kernel ends individually, rather than when the entire batch ends
         [compute_buffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-          kernel_status[kernel.kernel_name].set_value(true);
+          kernel_status[kernel.kernel_name] = true;
         }];
 
         [compute_encoder endEncoding];

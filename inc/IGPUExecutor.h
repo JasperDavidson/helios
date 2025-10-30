@@ -82,10 +82,14 @@ class IGPUExecutor {
     // Allows for checking of buffer sizes without access to device specific buffer maps
     virtual int get_buffer_length(const GPUBufferHandle &buffer_handle) = 0;
 
+    // Note this will default construct to false if value is not present - intended behavior here
+    bool get_kernel_status(const std::string &kernel_name) { return kernel_status[kernel_name]; }
+
     virtual ~IGPUExecutor() = default;
 
+  protected:
     // Allows for the scheduler to check the status of kernels it has dispatched (kernel name -> future promise)
-    std::unordered_map<std::string, std::promise<bool>> kernel_status;
+    std::unordered_map<std::string, bool> kernel_status;
 };
 
 #endif
