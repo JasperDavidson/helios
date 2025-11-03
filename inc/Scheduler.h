@@ -9,7 +9,7 @@
 
 class Scheduler {
   public:
-    Scheduler(const DataManager &data_manager, std::shared_ptr<ThreadPool> thread_pool,
+    Scheduler(DataManager &data_manager, std::shared_ptr<ThreadPool> thread_pool,
               std::shared_ptr<IGPUExecutor> gpu_executor)
         : data_manager(data_manager), thread_pool(thread_pool), gpu_executor(gpu_executor) {};
 
@@ -17,7 +17,7 @@ class Scheduler {
     template <typename F, class... Types> void visit(const CPUTask<F, Types...> &cpu_task) const {
         thread_pool->add_task(cpu_task.task_lambda);
     };
-    void visit(const GPUTask &gpu_task) const;
+    void visit(const GPUTask &gpu_task);
 
     bool check_kernel_status(const std::string &kernel_name) { return gpu_executor->get_kernel_status(kernel_name); }
 

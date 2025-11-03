@@ -4,46 +4,111 @@
 #include "Runtime.h"
 #include "Tasks.h"
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <memory>
 #include <queue>
 #include <unordered_map>
 #include <vector>
 
-void Scheduler::visit(const GPUTask &gpu_task) const {
+const size_t COUNTER_BUFFER_SIZE = 8;
+
+size_t bytes_to_val(const std::span<std::byte> bytes) {
+    size_t val = 0;
+
+    for (int i = 0; i < bytes.size(); ++i) {
+        val |= (static_cast<size_t>(bytes[i]) << (i * 8));
+    }
+
+    return val;
+}
+
+void Scheduler::visit(const GPUTask &gpu_task) {
     // Figure out if appropriate buffer space already exists on the GPU; if not create it
     // - This allows for reusing buffers from previous kernels, saving resources
-    std::vector<GPUBufferHandle> buffers_not_in_use; //  = someAlgorithmToDetermineBuffersNotInUse
+    std::vector<GPUBufferHandle> buffers_not_in_use; // TODO:  = someAlgorithmToDetermineBuffersNotInUse
     std::multimap<int, GPUBufferHandle> size_to_buffer;
 
     // Use multimap for better efficiency when searching for unused buffers
-    std::ranges::for_each(buffers_not_in_use, [&](const GPUBufferHandle &buffer_handle) {
+    for (const GPUBufferHandle &buffer_handle : buffers_not_in_use) {
         size_to_buffer.emplace(data_manager.get_data_length(buffer_handle.ID), buffer_handle);
-    });
+    }
 
+    size_t max_input_size = 0;
     std::vector<BufferBinding> buffer_bindings;
     for (int i = 0; i < gpu_task.input_ids.size(); ++i) {
         size_t input_data_size = data_manager.get_data_length(gpu_task.input_ids[i]);
         MemoryHint data_mem_hint = data_manager.get_mem_hint(gpu_task.input_ids[i]);
-        auto input_data = data_manager.get_data_span(gpu_task.input_ids[i]);
+        BufferUsage data_buffer_usage = data_manager.get_buffer_usage(gpu_task.input_ids[i]);
+        auto input_data = data_manager.get_span(gpu_task.input_ids[i]);
+
+        // Maintain max input size if user doesn't specify other method for output size tracking
+        max_input_size = std::max(max_input_size, input_data_size);
 
         auto potential_buffer = size_to_buffer.lower_bound(input_data_size);
 
         if (potential_buffer != size_to_buffer.end()) {
             potential_buffer->second.mem_hint = data_mem_hint;
-            buffer_bindings.push_back(BufferBinding(potential_buffer->second, gpu_task.buffer_usages[i]));
+            buffer_bindings.push_back(BufferBinding(potential_buffer->second, data_buffer_usage));
             gpu_executor->copy_to_device(input_data, potential_buffer->second, input_data_size);
             size_to_buffer.erase(potential_buffer);
         } else {
             GPUBufferHandle new_buffer = gpu_executor->allocate_buffer(input_data_size, data_mem_hint);
+            buffer_bindings.push_back(BufferBinding(new_buffer, data_buffer_usage));
             gpu_executor->copy_to_device(input_data, new_buffer, input_data_size);
         }
     }
 
+    // TODO: Need to handle if output was marked as DeviceLocal (output is only intermediary for other GPU op)
+    //  - Maybe could even apply an optimization to detect this?
+
+    // Since output size is by default 0, assume user wanted max input size if it is
+    size_t user_output_size = data_manager.get_data_length(gpu_task.output_id);
+    size_t output_size = user_output_size == 0 ? max_input_size : user_output_size;
+    MemoryHint output_mem_hint = data_manager.get_mem_hint(gpu_task.output_id);
+    BufferUsage output_buffer_usage = data_manager.get_buffer_usage(gpu_task.output_id);
+
+    auto potential_output_buffer = size_to_buffer.lower_bound(output_size);
+    if (potential_output_buffer != size_to_buffer.end()) {
+        potential_output_buffer->second.mem_hint = output_mem_hint;
+        buffer_bindings.push_back(BufferBinding(potential_output_buffer->second, output_buffer_usage));
+        size_to_buffer.erase(potential_output_buffer);
+    } else {
+        GPUBufferHandle new_buffer = gpu_executor->allocate_buffer(max_input_size, output_mem_hint);
+        buffer_bindings.push_back(BufferBinding(new_buffer, output_buffer_usage));
+    }
+
+    // Manage count buffer if requested, last buffer since it may or may not be included
+    GPUBufferHandle count_buffer;
+    if (data_manager.get_buffer_count_request(gpu_task.output_id)) {
+        // This allows for 8 bytes of counting (64 bit size_t)
+        count_buffer = gpu_executor->allocate_buffer(COUNTER_BUFFER_SIZE, MemoryHint::HostVisible);
+        buffer_bindings.push_back(BufferBinding(count_buffer, BufferUsage::ReadWrite));
+    }
+
+    // TODO: Implement CPU callbacks for output retrieval to CPU
+    // Needs to notify the event based scheduling loop once data has been fully received
+    // What if the data can stay on the GPU between tasks, this would reduce overhead -> handling multiple
+    // types of callbacks?
+    std::function<void()> cpu_callback = [&]() {
+        std::span<std::byte> output_span = data_manager.get_span_mut(gpu_task.output_id);
+
+        if (data_manager.get_buffer_count_request(gpu_task.output_id)) {
+            std::vector<std::byte> byte_vec(COUNTER_BUFFER_SIZE);
+            std::span<std::byte> counted_span(byte_vec);
+            gpu_executor->copy_from_device(counted_span, buffer_bindings[-1].buffer_handle, COUNTER_BUFFER_SIZE, true);
+
+            size_t counted_bytes = bytes_to_val(counted_span);
+            this->gpu_executor->copy_from_device(output_span, count_buffer, counted_bytes, false);
+        } else {
+            this->gpu_executor->copy_from_device(output_span, buffer_bindings[-1].buffer_handle, output_size, false);
+        }
+    };
+
     // Assemble the kernel dispatch and assign it to the GPU
     KernelDispatch kernel(gpu_task.task_name, buffer_bindings, gpu_task.kernel_size, gpu_task.threads_per_group);
-    gpu_executor->execute_kernel(kernel);
-}
+    gpu_executor->execute_kernel(kernel, cpu_callback);
+};
 
 /*
  * Maintains state of currently running tasks, tasks that are ready to be ran, and tasks that need dependencies met
@@ -127,40 +192,4 @@ template <typename F, class... Types> void Scheduler::execute_graph(const TaskGr
             }
         }
     }
-
-    // Inefficient polling solution
-    /*
-        while (num_complete < graph_tasks.size()) {
-            for (auto task_iter = graph_tasks.begin(); task_iter != graph_tasks.end(); ++task_iter) {
-
-                if (task_iter->second.state == TaskState::Ready) {
-                    task_graph.get_task(task_iter->first)->accept(*this);
-                }
-
-                if (task_iter->second.state == TaskState::Running) {
-                    std::shared_ptr<ITask> running_task = task_graph.get_task(task_iter->first);
-
-                    if (auto gpu_task = std::dynamic_pointer_cast<GPUTask>(running_task)) {
-                        if (gpu_executor->get_kernel_status(gpu_task->task_name)) {
-                            task_iter->second.state = TaskState::Complete;
-                            num_complete++;
-
-                            for (int dependent_id : task_graph.get_dependents(task_iter->first)) {
-                                graph_tasks[dependent_id].num_dependencies -= 1;
-                            }
-                        }
-                    } else if (auto cpu_task = std::dynamic_pointer_cast<CPUTask<F, Types...>>(running_task)) {
-                        if (cpu_task->task_complete()) {
-                            task_iter->second.state = TaskState::Complete;
-                            num_complete++;
-
-                            for (int dependent_id : task_graph.get_dependents(task_iter->first)) {
-                                graph_tasks[dependent_id].num_dependencies -= 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    */
 }

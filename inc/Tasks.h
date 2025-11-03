@@ -53,14 +53,15 @@ template <typename F, class... Types> class CPUTask : public ITask {
     void accept(Scheduler &scheduler) override;
 };
 
+// NOTE: GPUTask Contract:
+// - Output buffer for kernel must always be the last buffer specified for a kernel
+// - If a count buffer is requested it should instead be the last buffer after the output buffer
 class GPUTask : public ITask {
-    // TODO: Need to generate a future for each task by analyzing the GPU somehow
-    // We could encode a lambda that checks if the bool map of dispatch complete has been updated for this task
-    //  - We can't actually check the map because the gpu executor is stored in the scheduler
-    // Should we generate a future for every GPU task when the scheduler begins to execute the graph?
-    //  - No, this would be inefficient + runtime type checking for tasks
-    // Maybe the scheduler visitor design method can return/emplace a future since it *does* have access to the gpu?
-    // (Check scheduler comments)
+    // TODO: How should we actually capture the data from the GPU?
+    //  - Implement a callback lambda that gets ran after the kernel is compute, transport memory back to output handle
+    //  - Since output handle is a 'placeholder' create a 'real' DataHandle that replaces it once result is achieved
+    //  KEY CHANGE: User must specify output size of kernel if the output size will differ from size of input objects,
+    //  or opt into buffer counting
   public:
     GPUTask(int ID, const std::string &task_name, const std::vector<int> &input_ids,
             const std::vector<BufferUsage> &buffer_usages, int output_id, const std::vector<int> &kernel_size,

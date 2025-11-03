@@ -2,7 +2,6 @@
 #define IGPU_H
 
 #include <functional>
-#include <future>
 #include <span>
 #include <unordered_map>
 
@@ -10,7 +9,10 @@
 enum class GPUState { GPUSuccess, GPUFailure, GhostBuffer, InvalidDispatchType };
 
 // Various states that can affect the level of optimization applied to memory buffers
-// BufferUsage - How the buffer will be accessed in the global system
+// BufferUsage - How the buffer will be accessed during GPU tasks, configurable so buffers can be reused
+// MemoryHint - How the data stored in the buffer will be treated throughout the lifetime of a task on a CPU/GPU level
+//  - Enables optimizations with private memory on the GPU, guarantee that only it has access to it
+// NOTE: Should BufferUsage be a more generalized data value? Might have some value on the CPU/other operations as well?
 enum class BufferUsage { ReadWrite, ReadOnly };
 enum class MemoryHint { DeviceLocal, HostVisible };
 
@@ -19,6 +21,7 @@ class GPUBufferHandle {
     int ID;
     MemoryHint mem_hint;
 
+    GPUBufferHandle() = default;
     GPUBufferHandle(int ID, MemoryHint mem_hint) : ID(ID), mem_hint(mem_hint) {};
     bool operator==(const GPUBufferHandle &other) const { return this->ID == other.ID; }
 };
@@ -70,13 +73,13 @@ class IGPUExecutor {
     GPUState virtual copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
                                     std::uint32_t data_size) = 0;
     GPUState virtual copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                      std::uint32_t data_size) = 0;
+                                      std::uint32_t data_size, bool sync) = 0;
 
-    GPUState virtual execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type) = 0;
-    GPUState virtual execute_kernel(const KernelDispatch &kernel) = 0;
+    GPUState virtual execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type,
+                                   std::function<void()> &cpu_callback) = 0;
+    GPUState virtual execute_kernel(const KernelDispatch &kernel, std::function<void()> &cpu_callback) = 0;
 
-    // Prevents more GPU tasks from being added until all current ones are
-    // complete
+    // Prevents more GPU tasks from being added until all current ones are complete
     GPUState virtual synchronize() = 0;
 
     // Allows for checking of buffer sizes without access to device specific buffer maps

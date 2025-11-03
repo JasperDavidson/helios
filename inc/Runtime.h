@@ -14,7 +14,7 @@ struct TaskRuntimeState {
 };
 
 /*
- * The Runtime is the owners of all the system resources
+ * The Runtime is the owner of all the system resources
  * It coordinates data handling and creating schedulers
  */
 class Runtime {

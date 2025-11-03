@@ -33,6 +33,7 @@ class ThreadPool {
 */
 
         // Only purpose now should be to notify the scheduler that the task is done - data storage handled *in task*
+        // TODO: Refactor this for event driven tasks
         std::shared_ptr<std::packaged_task<void()>> task_package = std::make_shared<std::packaged_task<void()>>(task);
         std::future<void> task_future = task_package->get_future();
 

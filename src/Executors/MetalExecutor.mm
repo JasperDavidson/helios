@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <functional>
+#include <future>
 #include <iterator>
 #include <objc/NSObjCRuntime.h>
 #include <stdexcept>
@@ -67,6 +69,7 @@ MetalExecutor::MetalExecutor() : mtl_device_(MTLCreateSystemDefaultDevice()) {
     load_default_library();
 
     pipeline_map_ = std::unordered_map<std::string, id<MTLComputePipelineState>>();
+    proxy_buffer_ = allocate_buffer(std::uint32_t buffer_size, MemoryHint::DeviceLocal);
 }
 
 GPUBufferHandle MetalExecutor::allocate_buffer(std::uint32_t buffer_size, const MemoryHint &mem_hint) {
@@ -74,12 +77,13 @@ GPUBufferHandle MetalExecutor::allocate_buffer(std::uint32_t buffer_size, const 
     GPUBufferHandle buffer_handle(buffer_counter, mem_hint);
     buffer_counter++;
 
-    // Create the buffer and map to its handle options:0 -> default storage option for the system (or private)
+    // Create the buffer and map to either private or managed storage load
+    // NOTE: Shared resources are not as useful due to needing to manage synchronization to avoid data races
     id<MTLBuffer> buffer;
     if (mem_hint == MemoryHint::DeviceLocal) {
         buffer = [mtl_device_ newBufferWithLength:buffer_size options:MTLResourceStorageModePrivate];
     } else if (mem_hint == MemoryHint::HostVisible) {
-        buffer = [mtl_device_ newBufferWithLength:buffer_size options:0];
+        buffer = [mtl_device_ newBufferWithLength:buffer_size options:MTLResourceStorageModeManaged];
     }
     buffer_map_[buffer_handle] = buffer;
 
@@ -109,7 +113,6 @@ GPUState MetalExecutor::copy_to_device(std::span<const std::byte> data_mem, cons
     id<MTLBuffer> buffer = buffer_it->second;
 
     // For private resources: Create a proxy buffer that can transfer to private
-    // For shared resources: Compute pipeline can ensure synchronization
     // For managed resources: Manually synchronized, CPU/GPU have unique copies
     if (([buffer resourceOptions] & MTLResourceStorageModePrivate) == MTLResourceStorageModePrivate) {
         id<MTLBuffer> proxy_buffer = [mtl_device_ newBufferWithBytes:data_mem.data() length:data_size options:0];
@@ -117,6 +120,8 @@ GPUState MetalExecutor::copy_to_device(std::span<const std::byte> data_mem, cons
         id<MTLBlitCommandEncoder> blit_encoder = [transfer_cmd_buffer blitCommandEncoder];
 
         // Placed in same queue as compute encoder so no need to block
+        // TODO: Implement a resident proxy buffer for private buffer needs
+        // Build a proxy buffer every time is bad perf
         [blit_encoder copyFromBuffer:proxy_buffer sourceOffset:0 toBuffer:buffer destinationOffset:0 size:data_size];
         [blit_encoder endEncoding];
         [transfer_cmd_buffer commit];
@@ -128,19 +133,22 @@ GPUState MetalExecutor::copy_to_device(std::span<const std::byte> data_mem, cons
         [buffer didModifyRange:NSMakeRange(0, data_size)];
 
         return GPUState::GPUSuccess;
-    } else if (([buffer resourceOptions] & MTLResourceStorageModeShared) == MTLResourceStorageModeShared) {
-        void *buffer_mem = [buffer contents];
-        memcpy(buffer_mem, data_mem.data(), data_size);
-
-        return GPUState::GPUSuccess;
     }
+
+    // NOTE: Shared resources are not as useful due to needing to manage synchronization to avoid data races
+    //    } else if (([buffer resourceOptions] & MTLResourceStorageModeShared) == MTLResourceStorageModeShared) {
+    //        void *buffer_mem = [buffer contents];
+    //        memcpy(buffer_mem, data_mem.data(), data_size);
+    //
+    //        return GPUState::GPUSuccess;
+    //    }
 
     // Invalid buffer storage type - shouldn't trigger
     return GPUState::GPUFailure;
 }
 
 GPUState MetalExecutor::copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                         std::uint32_t data_size) {
+                                         std::uint32_t data_size, bool sync) {
     auto buffer_it = buffer_map_.find(buffer_handle);
     if (buffer_it == buffer_map_.end()) {
         return GPUState::GhostBuffer;
@@ -149,7 +157,6 @@ GPUState MetalExecutor::copy_from_device(std::span<std::byte> data_mem, const GP
     id<MTLBuffer> buffer = buffer_it->second;
 
     // For private resources: Create a proxy buffer that can contain private data and transfer to CPU
-    // For shared resources: Queue an empty command buffer --> "finishes" after GPU write is complete
     // For managed resources: CPU/GPU have unique copies - block to ensure data transfer is complete
     if (([buffer resourceOptions] & MTLResourceStorageModePrivate) == MTLResourceStorageModePrivate) {
         // Use a proxy buffer to transfer data
@@ -160,10 +167,17 @@ GPUState MetalExecutor::copy_from_device(std::span<std::byte> data_mem, const GP
         [blit_encoder copyFromBuffer:buffer sourceOffset:0 toBuffer:proxy_buffer destinationOffset:0 size:data_size];
         [blit_encoder endEncoding];
         [transfer_cmd_buffer commit];
-        [transfer_cmd_buffer waitUntilCompleted];
 
-        void *proxy_mem = [proxy_buffer contents];
-        memcpy(data_mem.data(), proxy_mem, data_size);
+        [transfer_cmd_buffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull) {
+          void *proxy_mem = [proxy_buffer contents];
+          memcpy(data_mem.data(), proxy_mem, data_size);
+        }];
+
+        if (sync) {
+            [transfer_cmd_buffer waitUntilCompleted];
+        }
+
+        return GPUState::GPUSuccess;
     } else if (([buffer resourceOptions] & MTLResourceStorageModeManaged) == MTLResourceStorageModeManaged) {
         id<MTLCommandBuffer> synchronize_cmd_buffer = [command_queue_ commandBuffer];
         id<MTLBlitCommandEncoder> blit_encoder = [synchronize_cmd_buffer blitCommandEncoder];
@@ -171,24 +185,37 @@ GPUState MetalExecutor::copy_from_device(std::span<std::byte> data_mem, const GP
         [blit_encoder synchronizeResource:buffer];
         [blit_encoder endEncoding];
         [synchronize_cmd_buffer commit];
-        [synchronize_cmd_buffer waitUntilCompleted];
 
-        void *buffer_mem = [buffer contents];
-        memcpy(data_mem.data(), buffer_mem, data_size);
-    } else if (([buffer resourceOptions] & MTLResourceStorageModeShared) == MTLResourceStorageModeShared) {
-        // Inefficient synchronize() call? Needed to be *safe* since it ensures data is fully written to before reading
-        // Task scheduler might be able to optimize task placement such that this isn't a big deal
-        synchronize();
+        // Allows for memory copying after gpu is finished - doesn't block CPU unless asked for
+        [synchronize_cmd_buffer addCompletedHandler:^(id<MTLCommandBuffer> synchronize_buffer) {
+          void *buffer_mem = [buffer contents];
+          memcpy(data_mem.data(), buffer_mem, data_size);
+        }];
 
-        void *buffer_mem = [buffer contents];
-        memcpy(data_mem.data(), buffer_mem, data_size);
+        if (sync) {
+            [synchronize_cmd_buffer waitUntilCompleted];
+        }
+
+        return GPUState::GPUSuccess;
     }
+
+    // NOTE: Shared resources are not as useful due to needing to manage synchronization to avoid data races
+    //    } else if (([buffer resourceOptions] & MTLResourceStorageModeShared) == MTLResourceStorageModeShared) {
+    //        // Inefficient synchronize() call? Needed to be *safe* since it ensures data is fully written to
+    //        before reading
+    //        // Task scheduler might be able to optimize task placement such that this isn't a big deal
+    //        synchronize();
+    //
+    //        void *buffer_mem = [buffer contents];
+    //        memcpy(data_mem.data(), buffer_mem, data_size);
+    //    }
 
     // Invalid buffer storage type - shouldn't trigger
     return GPUState::GPUFailure;
 }
 
-GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type) {
+GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type,
+                                      std::function<void()> &cpu_callback) {
     for (const KernelDispatch &kernel : kernels) {
         // Construct a buffer for each kernel, needed to allow for end commands for individual kernel completion
         id<MTLCommandBuffer> compute_buffer = [command_queue_ commandBuffer];
@@ -227,8 +254,8 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
         [compute_encoder dispatchThreadgroups:groups_per_grid threadsPerThreadgroup:threads_per_group];
 
         // Update when each kernel ends individually, rather than when the entire batch ends
-        [compute_buffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-          kernel_status[kernel.kernel_name] = true;
+        [compute_buffer addCompletedHandler:^(id<MTLCommandBuffer> compute_buffer) {
+          cpu_callback();
         }];
 
         [compute_encoder endEncoding];
@@ -238,8 +265,8 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
     return GPUState::GPUSuccess;
 }
 
-GPUState MetalExecutor::execute_kernel(const KernelDispatch &kernel) {
-    return execute_batch({kernel}, DispatchType::Serial);
+GPUState MetalExecutor::execute_kernel(const KernelDispatch &kernel, std::function<void()> &cpu_callback) {
+    return execute_batch({kernel}, DispatchType::Serial, cpu_callback);
 }
 
 // Add a final empty command buffer and block until it finishes

@@ -1,7 +1,6 @@
 #include "Tasks.h"
 #include "Scheduler.h"
 #include <deque>
-#include <future>
 #include <mach/task_info.h>
 #include <memory>
 #include <stdexcept>

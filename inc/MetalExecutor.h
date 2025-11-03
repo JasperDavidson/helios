@@ -23,10 +23,11 @@ class MetalExecutor : public IGPUExecutor {
     GPUState copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
                             std::uint32_t data_size) override;
     GPUState copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                              std::uint32_t data_size) override;
+                              std::uint32_t data_size, bool sync) override;
 
-    GPUState execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type) override;
-    GPUState execute_kernel(const KernelDispatch &kernel) override;
+    GPUState execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type,
+                           std::function<void()> &cpu_callback) override;
+    GPUState execute_kernel(const KernelDispatch &kernel, std::function<void()> &cpu_callback) override;
 
     GPUState synchronize() override;
 
@@ -40,6 +41,9 @@ class MetalExecutor : public IGPUExecutor {
     id<MTLDevice> mtl_device_;
     id<MTLCommandQueue> command_queue_;
     id<MTLLibrary> mtl_library_;
+
+    // Reusable proxy buffer private resources
+    GPUBufferHandle proxy_buffer_;
 
     // map for storing already prepared compute pipelines
     std::unordered_map<std::string, id<MTLComputePipelineState>> pipeline_map_;
