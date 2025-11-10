@@ -9,8 +9,8 @@
 
 class Scheduler {
   public:
-    Scheduler(DataManager &data_manager, std::shared_ptr<ThreadPool> thread_pool,
-              std::shared_ptr<IGPUExecutor> gpu_executor)
+    Scheduler(DataManager &data_manager, std::unique_ptr<ThreadPool> &thread_pool,
+              std::unique_ptr<IGPUExecutor> &gpu_executor)
         : data_manager(data_manager), thread_pool(thread_pool), gpu_executor(gpu_executor) {};
 
     // TODO: For both visit methods, implement event polling -> wrap in a lambda that triggers queue cond. var.
@@ -21,12 +21,12 @@ class Scheduler {
 
     bool check_kernel_status(const std::string &kernel_name) { return gpu_executor->get_kernel_status(kernel_name); }
 
-    template <typename F, class... Types> void execute_graph(const TaskGraph &task_graph);
+    void execute_graph(const TaskGraph &task_graph);
 
   private:
     DataManager data_manager;
-    std::shared_ptr<ThreadPool> thread_pool;
-    std::shared_ptr<IGPUExecutor> gpu_executor;
+    std::unique_ptr<ThreadPool> &thread_pool;
+    std::unique_ptr<IGPUExecutor> &gpu_executor;
 };
 
 #endif

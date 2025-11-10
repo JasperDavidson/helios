@@ -8,13 +8,12 @@
 #include <mutex>
 #include <queue>
 #include <thread>
-#include <tuple>
 #include <type_traits>
-#include <utility>
 
 class ThreadPool {
   public:
     ThreadPool(size_t num_threads);
+    ThreadPool() {};
     ~ThreadPool();
 
     template <typename F, class... Types>

@@ -2,28 +2,24 @@
 #define METAL_H
 
 #include "IGPUExecutor.h"
-#include <Foundation/Foundation.h>
-#include <Foundation/NSObjCRuntime.h>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
-
-@protocol MTLDevice;
-@protocol MTLCommandQueue;
-@protocol MTLBuffer;
-@protocol MTLLibrary;
-@protocol MTLComputePipelineState;
 
 class MetalExecutor : public IGPUExecutor {
   public:
-    MetalExecutor();
+    // If no device local (private) buffers will be used, no proxy buffer is needed
+    MetalExecutor(size_t proxy_size = 0);
+    ~MetalExecutor();
 
-    GPUBufferHandle allocate_buffer(std::uint32_t buffer_size, const MemoryHint &mem_hint) override;
+    GPUBufferHandle allocate_buffer(std::size_t buffer_size, const MemoryHint &mem_hint) override;
     GPUState deallocate_buffer(const GPUBufferHandle &buffer_handle) override;
 
     GPUState copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                            std::uint32_t data_size) override;
+                            std::size_t data_size) override;
     GPUState copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                              std::uint32_t data_size, bool sync) override;
+                              std::size_t data_size, bool sync) override;
 
     GPUState execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type,
                            std::function<void()> &cpu_callback) override;
@@ -34,25 +30,18 @@ class MetalExecutor : public IGPUExecutor {
     int get_buffer_length(const GPUBufferHandle &buffer_handle) override;
 
   private:
-    static constexpr NSString *const LIBRARY_NAME = @"kernels";
     int buffer_counter = 0;
 
-    // Metal specific variables
-    id<MTLDevice> mtl_device_;
-    id<MTLCommandQueue> command_queue_;
-    id<MTLLibrary> mtl_library_;
+    struct MetalExecutorImpl;
+    std::unique_ptr<MetalExecutorImpl> p_metal_impl;
 
     // Reusable proxy buffer private resources
     GPUBufferHandle proxy_buffer_;
 
-    // map for storing already prepared compute pipelines
-    std::unordered_map<std::string, id<MTLComputePipelineState>> pipeline_map_;
-
-    // map for storing GPU buffer handles
-    std::unordered_map<GPUBufferHandle, id<MTLBuffer>> buffer_map_;
-
     void load_default_library();
-    id<MTLComputePipelineState> find_cache_pipeline(const std::string &kernel_name);
+
+    // Provides access to proxy buffer and extends size if needed
+    GPUBufferHandle access_proxy(size_t data_size);
 };
 
 #endif

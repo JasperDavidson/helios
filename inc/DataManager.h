@@ -39,6 +39,9 @@ class DataManager {
     template <typename T>
     DataHandle<T> create_data_handle(T &&data, const BufferUsage &buffer_usage = BufferUsage::ReadWrite,
                                      const MemoryHint &mem_hint = MemoryHint::DeviceLocal);
+
+    // Constructor for kernel output data of variable size
+    // Will either use the max input size or requires user to set up buffer counting
     template <typename T>
     DataHandle<T> create_date_handle(const BufferUsage &buffer_usage = BufferUsage::ReadWrite,
                                      const MemoryHint &mem_hint = MemoryHint::HostVisible, size_t byte_size = 0,
@@ -50,11 +53,13 @@ class DataManager {
     std::span<std::byte> get_span_mut(int ID);
     int get_data_length(int ID) const { return data_map.at(ID).byte_size; };
     bool get_buffer_count_request(int ID) const { return data_map.at(ID).buffer_count; };
-    MemoryHint get_mem_hint(int ID) const { return data_map.at(ID).mem_hint; };
-    BufferUsage get_buffer_usage(int ID) const { return data_map.at(ID).buffer_usage; };
+    const MemoryHint &get_mem_hint(int ID) const { return data_map.at(ID).mem_hint; };
+    const BufferUsage &get_buffer_usage(int ID) const { return data_map.at(ID).buffer_usage; };
+    const std::vector<DataEntry> &get_device_local_tasks() const { return device_local_tasks_; };
 
   private:
     std::unordered_map<int, DataEntry> data_map;
+    std::vector<DataEntry> device_local_tasks_;
     size_t id_counter = 0;
 };
 

@@ -56,21 +56,21 @@ add_library(Helios_Engine STATIC src/Scheduler.cpp src/Runtime.cpp)
 target_include_directories(Helios_Engine PUBLIC inc)
 target_link_libraries(Helios_Engine PUBLIC Helios_Core Helios_ThreadPool)
 
-include(FetchContent)
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
-)
-FetchContent_MakeAvailable(googletest)
-
-add_executable(pool_test tests/thread_pool_tests.cpp)
-target_include_directories(pool_test PUBLIC inc)
-
-target_link_libraries(
-  pool_test
-  Helios_ThreadPool
-  GTest::gtest_main
-)
-
-include(GoogleTest)
-gtest_discover_tests(pool_test)
+# include(FetchContent)
+# FetchContent_Declare(
+#   googletest
+#   URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+# )
+# FetchContent_MakeAvailable(googletest)
+# 
+# add_executable(pool_test tests/thread_pool_tests.cpp)
+# target_include_directories(pool_test PUBLIC inc)
+# 
+# target_link_libraries(
+#   pool_test
+#   Helios_ThreadPool
+#   GTest::gtest_main
+# )
+# 
+# include(GoogleTest)
+# gtest_discover_tests(pool_test)

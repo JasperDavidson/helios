@@ -55,6 +55,10 @@ DataHandle<T> DataManager::create_data_handle(T &&data, const BufferUsage &buffe
     data_handle.ID = id_counter++;
     data_map[data_handle.ID] = entry;
 
+    if (mem_hint == MemoryHint::DeviceLocal) {
+        device_local_tasks_.push_back(entry);
+    }
+
     return data_handle;
 }
 
@@ -74,5 +78,10 @@ DataHandle<T> DataManager::create_date_handle(const BufferUsage &buffer_usage, c
     entry.byte_size = byte_size;
 
     data_handle.ID = id_counter++;
+
+    if (mem_hint == MemoryHint::DeviceLocal) {
+        device_local_tasks_.push_back(entry);
+    }
+
     data_map[data_handle.ID] = entry;
 }

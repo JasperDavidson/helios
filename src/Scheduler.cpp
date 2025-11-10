@@ -59,7 +59,8 @@ void Scheduler::visit(const GPUTask &gpu_task) {
         }
     }
 
-    // TODO: Need to handle if output was marked as DeviceLocal (output is only intermediary for other GPU op)
+    // TODO: Need to handle if output was marked as DeviceLocal and output is only intermediary for other GPU op
+    //  - Would mean data wouldn't need to copied back to CPU
     //  - Maybe could even apply an optimization to detect this?
 
     // Since output size is by default 0, assume user wanted max input size if it is
@@ -124,7 +125,7 @@ void Scheduler::visit(const GPUTask &gpu_task) {
     //      - Employ a thread safe queue that has a condition variable such that when something is added to a completion
     //      queue it wakes up and updates everything
  */
-template <typename F, class... Types> void Scheduler::execute_graph(const TaskGraph &task_graph) {
+void Scheduler::execute_graph(const TaskGraph &task_graph) {
     // Map that indicates each tasks current state, and ensure the root tasks (no dependencies) are ready for exec
     std::unordered_map<int, TaskRuntimeState> graph_tasks;
     int num_complete;

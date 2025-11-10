@@ -5,6 +5,8 @@
 #include "IGPUExecutor.h"
 #include "Tasks.h"
 #include "ThreadPool.h"
+#include <memory>
+#include <variant>
 
 enum class TaskState { Pending, Ready, Running, Complete };
 
@@ -13,20 +15,36 @@ struct TaskRuntimeState {
     int num_dependencies;
 };
 
+enum class GPUBackend { Metal, Cuda };
+
+struct GPUDevice {
+    GPUBackend backend;
+    // "Made permanent proxy buffer for private Metal access that scales according to need, implemented pimpl to
+    // separate objc++, fleshed out runtime a bit more, and a few other api changes" If device_id -1 then there is an
+    // implicit GPU to use (e.g. Metal), otherwise an ID should be provided (e.g. CUDA)
+    int device_id = -1;
+};
+
 /*
  * The Runtime is the owner of all the system resources
  * It coordinates data handling and creating schedulers
  */
 class Runtime {
   public:
-    // Returns a future so that user can wait for the graph to complete when needed
-    // Immediately communicatoes with the scheduler to begin executing tasks
-    std::future<void> commit_graph(TaskGraph &task_graph);
+    // The GPU executor and Thread Pool are created at initialization to accurately reflect system state
+    Runtime(DataManager &data_manager, size_t num_threads) : data_manager_(data_manager), num_threads(num_threads) {};
+
+    // Immediately communicates with the scheduler to begin executing tasks
+    std::future<void> commit_graph(TaskGraph &task_graph, GPUDevice &device_info);
 
   private:
-    DataManager data_manager;
-    std::shared_ptr<ThreadPool> thread_pool;
-    std::shared_ptr<IGPUExecutor> gpu_exec;
+    DataManager &data_manager_;
+    std::unique_ptr<ThreadPool> thread_pool_;
+    std::unique_ptr<IGPUExecutor> gpu_exec_;
+    size_t num_threads;
+
+    void create_thread_pool_() { thread_pool_ = std::make_unique<ThreadPool>(num_threads); };
+    void create_executor_(GPUDevice &device_info, const TaskGraph &task_graph);
 };
 
 #endif
