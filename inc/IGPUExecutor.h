@@ -16,7 +16,6 @@ enum class GPUState { GPUSuccess, GPUFailure, GhostBuffer, InvalidDispatchType }
 
 // NOTE: Should BufferUsage be a more generalized data value? Might have some value on the CPU/other operations as well?
 // Buffer Usage used for Scheduling purposes primarily (e.g. two kernels can read from a buffer at the same time)
-enum class BufferUsage { ReadWrite, ReadOnly };
 enum class MemoryHint { DeviceLocal, HostVisible };
 
 class GPUBufferHandle {
@@ -38,18 +37,11 @@ template <> struct std::hash<GPUBufferHandle> {
 };
 } // namespace std
 
-// Encapsulate information about buffers and kernels
-
-// Separate so that buffer handles can be reused across kernels
-struct BufferBinding {
-    GPUBufferHandle buffer_handle;
-    BufferUsage buffer_usage;
-};
-
+// Encapsulate information about kernels
 class KernelDispatch {
   public:
     std::string kernel_name;
-    std::vector<BufferBinding> buffer_bindings;
+    std::vector<GPUBufferHandle> buffer_handles;
     std::vector<int> kernel_size;
     std::vector<int> threads_per_group;
 

@@ -19,8 +19,6 @@ enum class GPUBackend { Metal, Cuda };
 
 struct GPUDevice {
     GPUBackend backend;
-    // "Made permanent proxy buffer for private Metal access that scales according to need, implemented pimpl to
-    // separate objc++, fleshed out runtime a bit more, and a few other api changes" If device_id -1 then there is an
     // implicit GPU to use (e.g. Metal), otherwise an ID should be provided (e.g. CUDA)
     int device_id = -1;
 };

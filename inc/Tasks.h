@@ -20,9 +20,11 @@ class ITask {
     std::string task_name;
     std::vector<int> input_ids;
     int output_id;
+    std::vector<DataUsage> data_usages;
 
-    ITask(int ID, const std::string &task_name, const std::vector<int> &input_ids, int output_id)
-        : ID(ID), task_name(task_name), input_ids(input_ids), output_id(output_id) {};
+    ITask(int ID, const std::string &task_name, const std::vector<int> &input_ids, int output_id,
+          const std::vector<DataUsage> &data_usages)
+        : ID(ID), task_name(task_name), input_ids(input_ids), output_id(output_id), data_usages(data_usages) {};
     ITask() = default;
 
     virtual void accept(Scheduler &scheduler) = 0;
@@ -33,8 +35,8 @@ template <typename F, class... Types> class CPUTask : public ITask {
     std::function<void()> task_lambda;
 
     CPUTask(int ID, std::string task_name, const std::vector<int> &input_ids, int output_id, DataManager &data_manager,
-            F &&task, Types &&...args)
-        : ITask(ID, task_name, input_ids, output_id) {
+            const std::vector<DataUsage> &data_usages, F &&task, Types &&...args)
+        : ITask(ID, task_name, input_ids, output_id, data_usages) {
         task_lambda = [=, task = std::forward<F>(task),
                        args_tuple = std::make_tuple(std::forward<Types>(args)...)]() mutable {
             // Bundle the input data
@@ -64,14 +66,13 @@ class GPUTask : public ITask {
     //  or opt into buffer counting
   public:
     GPUTask(int ID, const std::string &task_name, const std::vector<int> &input_ids,
-            const std::vector<BufferUsage> &buffer_usages, int output_id, const std::vector<int> &kernel_size,
+            const std::vector<DataUsage> &data_usages, int output_id, const std::vector<int> &kernel_size,
             const std::vector<int> &threads_per_group)
-        : ITask(ID, task_name, input_ids, output_id), kernel_size(kernel_size), threads_per_group(threads_per_group),
-          buffer_usages(buffer_usages) {};
+        : ITask(ID, task_name, input_ids, output_id, data_usages), kernel_size(kernel_size),
+          threads_per_group(threads_per_group) {};
 
     std::vector<int> kernel_size;
     std::vector<int> threads_per_group;
-    std::vector<BufferUsage> buffer_usages;
 
   private:
     void accept(Scheduler &scheduler) override;

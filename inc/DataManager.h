@@ -12,6 +12,8 @@ template <typename T> class DataHandle {
     DataHandle(int ID) : ID(ID) {};
 };
 
+enum class DataUsage { ReadWrite, ReadOnly };
+
 struct DataEntry {
     std::any data;
     size_t byte_size;
@@ -22,8 +24,8 @@ struct DataEntry {
     // Parameter for maintaining dynamic GPU output if user wishes
     bool buffer_count = false;
 
-    // Parameter for how data will be accessed
-    BufferUsage buffer_usage;
+    // Parameter describing how data will be accessed (default is ReadWrite for safety)
+    DataUsage data_usage;
 
     // Generic getters for accessing data memory
     std::function<std::span<const std::byte>()> const_data_accessor;
@@ -37,13 +39,13 @@ class DataManager {
         return std::any_cast<T>(data_map.at(data_handle.ID).data);
     }
     template <typename T>
-    DataHandle<T> create_data_handle(T &&data, const BufferUsage &buffer_usage = BufferUsage::ReadWrite,
+    DataHandle<T> create_data_handle(T &&data, const DataUsage &data_usage = DataUsage::ReadWrite,
                                      const MemoryHint &mem_hint = MemoryHint::DeviceLocal);
 
     // Constructor for kernel output data of variable size
     // Will either use the max input size or requires user to set up buffer counting
     template <typename T>
-    DataHandle<T> create_date_handle(const BufferUsage &buffer_usage = BufferUsage::ReadWrite,
+    DataHandle<T> create_date_handle(const DataUsage &data_usage = DataUsage::ReadWrite,
                                      const MemoryHint &mem_hint = MemoryHint::HostVisible, size_t byte_size = 0,
                                      bool buffer_count = false);
 
@@ -54,7 +56,7 @@ class DataManager {
     int get_data_length(int ID) const { return data_map.at(ID).byte_size; };
     bool get_buffer_count_request(int ID) const { return data_map.at(ID).buffer_count; };
     const MemoryHint &get_mem_hint(int ID) const { return data_map.at(ID).mem_hint; };
-    const BufferUsage &get_buffer_usage(int ID) const { return data_map.at(ID).buffer_usage; };
+    const DataUsage &get_buffer_usage(int ID) const { return data_map.at(ID).data_usage; };
     const std::vector<DataEntry> &get_device_local_tasks() const { return device_local_tasks_; };
 
   private:

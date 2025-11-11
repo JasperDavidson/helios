@@ -273,9 +273,9 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
 
         [compute_encoder setComputePipelineState:compute_pipeline];
 
-        for (int j = 0; j < kernel.buffer_bindings.size(); ++j) {
+        for (int j = 0; j < kernel.buffer_handles.size(); ++j) {
             // TODO: Handle if buffer is not in the map (invalid buffer, NEVER ALLOCATED)
-            id<MTLBuffer> bind_buffer = p_metal_impl->buffer_map_[kernel.buffer_bindings[j].buffer_handle];
+            id<MTLBuffer> bind_buffer = p_metal_impl->buffer_map_[kernel.buffer_handles[j]];
 
             // Each buffer must be bound at a unique index
             [compute_encoder setBuffer:bind_buffer offset:0 atIndex:j];

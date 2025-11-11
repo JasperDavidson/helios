@@ -35,11 +35,10 @@ void Scheduler::visit(const GPUTask &gpu_task) {
     }
 
     size_t max_input_size = 0;
-    std::vector<BufferBinding> buffer_bindings;
+    std::vector<GPUBufferHandle> buffer_handles;
     for (int i = 0; i < gpu_task.input_ids.size(); ++i) {
         size_t input_data_size = data_manager.get_data_length(gpu_task.input_ids[i]);
         MemoryHint data_mem_hint = data_manager.get_mem_hint(gpu_task.input_ids[i]);
-        BufferUsage data_buffer_usage = data_manager.get_buffer_usage(gpu_task.input_ids[i]);
         auto input_data = data_manager.get_span(gpu_task.input_ids[i]);
 
         // Maintain max input size if user doesn't specify other method for output size tracking
@@ -49,12 +48,12 @@ void Scheduler::visit(const GPUTask &gpu_task) {
 
         if (potential_buffer != size_to_buffer.end()) {
             potential_buffer->second.mem_hint = data_mem_hint;
-            buffer_bindings.push_back(BufferBinding(potential_buffer->second, data_buffer_usage));
+            buffer_handles.push_back(potential_buffer->second);
             gpu_executor->copy_to_device(input_data, potential_buffer->second, input_data_size);
             size_to_buffer.erase(potential_buffer);
         } else {
             GPUBufferHandle new_buffer = gpu_executor->allocate_buffer(input_data_size, data_mem_hint);
-            buffer_bindings.push_back(BufferBinding(new_buffer, data_buffer_usage));
+            buffer_handles.push_back(new_buffer);
             gpu_executor->copy_to_device(input_data, new_buffer, input_data_size);
         }
     }
@@ -67,16 +66,15 @@ void Scheduler::visit(const GPUTask &gpu_task) {
     size_t user_output_size = data_manager.get_data_length(gpu_task.output_id);
     size_t output_size = user_output_size == 0 ? max_input_size : user_output_size;
     MemoryHint output_mem_hint = data_manager.get_mem_hint(gpu_task.output_id);
-    BufferUsage output_buffer_usage = data_manager.get_buffer_usage(gpu_task.output_id);
 
     auto potential_output_buffer = size_to_buffer.lower_bound(output_size);
     if (potential_output_buffer != size_to_buffer.end()) {
         potential_output_buffer->second.mem_hint = output_mem_hint;
-        buffer_bindings.push_back(BufferBinding(potential_output_buffer->second, output_buffer_usage));
+        buffer_handles.push_back(potential_output_buffer->second);
         size_to_buffer.erase(potential_output_buffer);
     } else {
         GPUBufferHandle new_buffer = gpu_executor->allocate_buffer(max_input_size, output_mem_hint);
-        buffer_bindings.push_back(BufferBinding(new_buffer, output_buffer_usage));
+        buffer_handles.push_back(new_buffer);
     }
 
     // Manage count buffer if requested, last buffer since it may or may not be included
@@ -84,7 +82,7 @@ void Scheduler::visit(const GPUTask &gpu_task) {
     if (data_manager.get_buffer_count_request(gpu_task.output_id)) {
         // This allows for 8 bytes of counting (64 bit size_t)
         count_buffer = gpu_executor->allocate_buffer(COUNTER_BUFFER_SIZE, MemoryHint::HostVisible);
-        buffer_bindings.push_back(BufferBinding(count_buffer, BufferUsage::ReadWrite));
+        buffer_handles.push_back(count_buffer);
     }
 
     // TODO: Implement CPU callbacks for output retrieval to CPU
@@ -97,17 +95,17 @@ void Scheduler::visit(const GPUTask &gpu_task) {
         if (data_manager.get_buffer_count_request(gpu_task.output_id)) {
             std::vector<std::byte> byte_vec(COUNTER_BUFFER_SIZE);
             std::span<std::byte> counted_span(byte_vec);
-            gpu_executor->copy_from_device(counted_span, buffer_bindings[-1].buffer_handle, COUNTER_BUFFER_SIZE, true);
+            gpu_executor->copy_from_device(counted_span, buffer_handles[-1], COUNTER_BUFFER_SIZE, true);
 
             size_t counted_bytes = bytes_to_val(counted_span);
             this->gpu_executor->copy_from_device(output_span, count_buffer, counted_bytes, false);
         } else {
-            this->gpu_executor->copy_from_device(output_span, buffer_bindings[-1].buffer_handle, output_size, false);
+            this->gpu_executor->copy_from_device(output_span, buffer_handles[-1], output_size, false);
         }
     };
 
     // Assemble the kernel dispatch and assign it to the GPU
-    KernelDispatch kernel(gpu_task.task_name, buffer_bindings, gpu_task.kernel_size, gpu_task.threads_per_group);
+    KernelDispatch kernel(gpu_task.task_name, buffer_handles, gpu_task.kernel_size, gpu_task.threads_per_group);
     gpu_executor->execute_kernel(kernel, cpu_callback);
 };
 
@@ -119,6 +117,10 @@ void Scheduler::visit(const GPUTask &gpu_task) {
  *  3. Check all running tasks and see if they have completed (if so remove them as dependencies)
  *
  *  Moving to implement an event-driven reaction system to avoid inefficient polling
+ *
+ * TODO: Figure out how to incorporate Memory usages into scheduler
+ *  - E.g. if memory is read/write only how can we apply optimizations?
+ *
  *  TODO: What if we instead make the Scheduler purely event driven, removing the need to wait on futures?
     //  - i.e. what if the CPU triggers a condition variable when the the task ends just like how Metal allows for
     //  completion handlers

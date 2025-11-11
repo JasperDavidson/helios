@@ -7,14 +7,14 @@
 #include <stdexcept>
 
 std::span<std::byte> DataManager::get_span_mut(int ID) {
-    if (data_map.at(ID).buffer_usage != BufferUsage::ReadWrite) {
+    if (data_map.at(ID).data_usage != DataUsage::ReadWrite) {
         throw std::runtime_error("Attempted to fetch mutable span into read-only data");
     }
     return data_map.at(ID).raw_data_accessor();
 };
 
 template <typename T>
-DataHandle<T> DataManager::create_data_handle(T &&data, const BufferUsage &buffer_usage, const MemoryHint &mem_hint) {
+DataHandle<T> DataManager::create_data_handle(T &&data, const DataUsage &buffer_usage, const MemoryHint &mem_hint) {
     DataEntry entry;
     DataHandle<T> data_handle;
 
@@ -22,7 +22,7 @@ DataHandle<T> DataManager::create_data_handle(T &&data, const BufferUsage &buffe
 
     entry.data = data_ptr;
     entry.mem_hint = mem_hint;
-    entry.buffer_usage = buffer_usage;
+    entry.data_usage = buffer_usage;
 
     // If true then T is a container type, else it's size can be found through sizeof() at compile time
     if constexpr (isContiguousContainer<T>::value) {
@@ -32,7 +32,7 @@ DataHandle<T> DataManager::create_data_handle(T &&data, const BufferUsage &buffe
             return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data_ptr->data()), byte_size);
         };
 
-        if (buffer_usage == BufferUsage::ReadWrite) {
+        if (buffer_usage == DataUsage::ReadWrite) {
             entry.raw_data_accessor = [data_ptr, byte_size]() {
                 return std::span<std::byte>(reinterpret_cast<std::byte *>(data_ptr->data()), byte_size);
             };
@@ -45,7 +45,7 @@ DataHandle<T> DataManager::create_data_handle(T &&data, const BufferUsage &buffe
                                               byte_size);
         };
 
-        if (buffer_usage == BufferUsage::ReadWrite) {
+        if (buffer_usage == DataUsage::ReadWrite) {
             entry.raw_data_accessor = [data_ptr, byte_size]() {
                 return std::span<std::byte>(reinterpret_cast<std::byte *>(std::addressof(*data_ptr), byte_size));
             };
@@ -67,14 +67,14 @@ DataHandle<T> DataManager::create_data_handle(T &&data, const BufferUsage &buffe
 // - Maintains a clear structure since the user always interaces with DataHandle objects
 // If byte size is -1, scheduler will assign largest byte size of inputs
 template <typename T>
-DataHandle<T> DataManager::create_date_handle(const BufferUsage &buffer_usage, const MemoryHint &mem_hint,
+DataHandle<T> DataManager::create_date_handle(const DataUsage &buffer_usage, const MemoryHint &mem_hint,
                                               size_t byte_size, bool buffer_count) {
     DataEntry entry;
     DataHandle<T> data_handle;
 
     entry.buffer_count = buffer_count;
     entry.mem_hint = mem_hint;
-    entry.buffer_usage = buffer_usage;
+    entry.data_usage = buffer_usage;
     entry.byte_size = byte_size;
 
     data_handle.ID = id_counter++;
