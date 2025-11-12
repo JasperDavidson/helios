@@ -17,7 +17,7 @@ class MetalExecutor : public IGPUExecutor {
     GPUState deallocate_buffer(const GPUBufferHandle &buffer_handle) override;
 
     GPUState copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                            std::size_t data_size) override;
+                            std::size_t data_size, bool sync) override;
     GPUState copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
                               std::size_t data_size, bool sync) override;
 
@@ -39,6 +39,16 @@ class MetalExecutor : public IGPUExecutor {
     GPUBufferHandle proxy_buffer_;
 
     void load_default_library();
+
+    // Helper functions for managing memory transfers
+    GPUState blit_to_private(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
+                             std::size_t data_size, bool sync);
+    GPUState memcpy_to_managed(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
+                               std::size_t data_size);
+    GPUState private_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle, std::size_t data_size,
+                            bool sync);
+    GPUState managed_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle, std::size_t data_size,
+                            bool sync);
 
     // Provides access to proxy buffer and extends size if needed
     GPUBufferHandle access_proxy(size_t data_size);

@@ -16,15 +16,15 @@ class Scheduler;
 
 class ITask {
   public:
-    int ID;
+    int id;
     std::string task_name;
     std::vector<int> input_ids;
     int output_id;
     std::vector<DataUsage> data_usages;
 
-    ITask(int ID, const std::string &task_name, const std::vector<int> &input_ids, int output_id,
+    ITask(int id, const std::string &task_name, const std::vector<int> &input_ids, int output_id,
           const std::vector<DataUsage> &data_usages)
-        : ID(ID), task_name(task_name), input_ids(input_ids), output_id(output_id), data_usages(data_usages) {};
+        : id(id), task_name(task_name), input_ids(input_ids), output_id(output_id), data_usages(data_usages) {};
     ITask() = default;
 
     virtual void accept(Scheduler &scheduler) = 0;
@@ -55,9 +55,6 @@ template <typename F, class... Types> class CPUTask : public ITask {
     void accept(Scheduler &scheduler) override;
 };
 
-// NOTE: GPUTask Contract:
-// - Output buffer for kernel must always be the last buffer specified for a kernel
-// - If a count buffer is requested it should instead be the last buffer after the output buffer
 class GPUTask : public ITask {
     // TODO: How should we actually capture the data from the GPU?
     //  - Implement a callback lambda that gets ran after the kernel is compute, transport memory back to output handle
@@ -66,13 +63,14 @@ class GPUTask : public ITask {
     //  or opt into buffer counting
   public:
     GPUTask(int ID, const std::string &task_name, const std::vector<int> &input_ids,
-            const std::vector<DataUsage> &data_usages, int output_id, const std::vector<int> &kernel_size,
-            const std::vector<int> &threads_per_group)
-        : ITask(ID, task_name, input_ids, output_id, data_usages), kernel_size(kernel_size),
-          threads_per_group(threads_per_group) {};
+            const std::vector<DataUsage> &data_usages, int output_id, bool count_buffer_active,
+            const std::vector<int> &kernel_size, const std::vector<int> &threads_per_group)
+        : ITask(ID, task_name, input_ids, output_id, data_usages), count_buffer_active(count_buffer_active),
+          kernel_size(kernel_size), threads_per_group(threads_per_group) {};
 
     std::vector<int> kernel_size;
     std::vector<int> threads_per_group;
+    bool count_buffer_active;
 
   private:
     void accept(Scheduler &scheduler) override;

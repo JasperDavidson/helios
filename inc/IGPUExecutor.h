@@ -66,7 +66,7 @@ class IGPUExecutor {
 
     // Sending memory between devices for task completion/after task completion
     GPUState virtual copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                    std::size_t data_size) = 0;
+                                    std::size_t data_size, bool sync) = 0;
     GPUState virtual copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
                                       std::size_t data_size, bool sync) = 0;
 

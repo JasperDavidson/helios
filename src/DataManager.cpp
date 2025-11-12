@@ -65,14 +65,12 @@ DataHandle<T> DataManager::create_data_handle(T &&data, const DataUsage &buffer_
 // NOTE: Effectively acts as a "placeholder" handle. When the data is passed back from the GPU, create a new "real" data
 // handle as above, and replace this one's position in the map
 // - Maintains a clear structure since the user always interaces with DataHandle objects
-// If byte size is -1, scheduler will assign largest byte size of inputs
 template <typename T>
 DataHandle<T> DataManager::create_date_handle(const DataUsage &buffer_usage, const MemoryHint &mem_hint,
-                                              size_t byte_size, bool buffer_count) {
+                                              size_t byte_size) {
     DataEntry entry;
     DataHandle<T> data_handle;
 
-    entry.buffer_count = buffer_count;
     entry.mem_hint = mem_hint;
     entry.data_usage = buffer_usage;
     entry.byte_size = byte_size;

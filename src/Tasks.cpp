@@ -13,7 +13,7 @@ template <typename F, class... Types> void CPUTask<F, Types...>::accept(Schedule
 void GPUTask::accept(Scheduler &scheduler) { scheduler.visit(*this); }
 
 void TaskGraph::add_task(std::shared_ptr<ITask> task) {
-    all_tasks_[task->ID] = task;
+    all_tasks_[task->id] = task;
 
     // Mapping the output of the task to the task itself
     if (data_producer_map_.find(task->output_id) != data_producer_map_.end()) {
@@ -21,24 +21,24 @@ void TaskGraph::add_task(std::shared_ptr<ITask> task) {
             "Error during TaskGraph construction: Attempted to assign multiple tasks to one data output");
     }
 
-    data_producer_map_[task->output_id] = task->ID;
+    data_producer_map_[task->output_id] = task->id;
 
     for (int input_id : task->input_ids) {
         // Marks the data as unfulfilled if no task has currently promised to produce it
         if (data_producer_map_.find(input_id) == data_producer_map_.end()) {
-            unfulfilled_data_[input_id].push_back(task->ID);
+            unfulfilled_data_[input_id].push_back(task->id);
             continue;
         }
 
         int data_producer_id = data_producer_map_[input_id];
-        dependencies_[task->ID].push_back(data_producer_id);
-        dependents_[data_producer_id].push_back(task->ID);
+        dependencies_[task->id].push_back(data_producer_id);
+        dependents_[data_producer_id].push_back(task->id);
 
         // If the data was previously unfilled, mark it as filled and update the tasks that required it
         if (unfulfilled_data_.find(input_id) != unfulfilled_data_.end()) {
             for (int unfulfilled_task_id : unfulfilled_data_[input_id]) {
-                dependencies_[unfulfilled_task_id].push_back(task->ID);
-                dependents_[task->ID].push_back(unfulfilled_task_id);
+                dependencies_[unfulfilled_task_id].push_back(task->id);
+                dependents_[task->id].push_back(unfulfilled_task_id);
             }
 
             unfulfilled_data_.erase(input_id);

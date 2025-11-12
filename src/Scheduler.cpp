@@ -9,11 +9,12 @@
 #include <memory>
 #include <queue>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 const size_t COUNTER_BUFFER_SIZE = 8;
 
-size_t bytes_to_val(const std::span<std::byte> bytes) {
+size_t count_bytes_to_size(const std::span<std::byte> bytes) {
     size_t val = 0;
 
     for (int i = 0; i < bytes.size(); ++i) {
@@ -22,6 +23,15 @@ size_t bytes_to_val(const std::span<std::byte> bytes) {
 
     return val;
 }
+
+template <typename F, class... Types> void Scheduler::visit(const CPUTask<F, Types...> &cpu_task) {
+    auto lambda_with_completion = [this](const CPUTask<F, Types...> &cpu_task) {
+        cpu_task.task_lambda();
+        completed_queue.push_task(cpu_task.id);
+    };
+
+    thread_pool->add_task(cpu_task.task_lambda);
+};
 
 void Scheduler::visit(const GPUTask &gpu_task) {
     // Figure out if appropriate buffer space already exists on the GPU; if not create it
@@ -46,19 +56,22 @@ void Scheduler::visit(const GPUTask &gpu_task) {
 
         auto potential_buffer = size_to_buffer.lower_bound(input_data_size);
 
+        // TODO: Look into decoupling so the scheduler can overlay I/O and compute
+        // Current serialization model is inefficient
+
         if (potential_buffer != size_to_buffer.end()) {
             potential_buffer->second.mem_hint = data_mem_hint;
             buffer_handles.push_back(potential_buffer->second);
-            gpu_executor->copy_to_device(input_data, potential_buffer->second, input_data_size);
+            gpu_executor->copy_to_device(input_data, potential_buffer->second, input_data_size, true);
             size_to_buffer.erase(potential_buffer);
         } else {
             GPUBufferHandle new_buffer = gpu_executor->allocate_buffer(input_data_size, data_mem_hint);
             buffer_handles.push_back(new_buffer);
-            gpu_executor->copy_to_device(input_data, new_buffer, input_data_size);
+            gpu_executor->copy_to_device(input_data, new_buffer, input_data_size, true);
         }
     }
 
-    // TODO: Need to handle if output was marked as DeviceLocal and output is only intermediary for other GPU op
+    // TODO: Should handle if output was marked as DeviceLocal and output is only intermediary for other GPU operation
     //  - Would mean data wouldn't need to copied back to CPU
     //  - Maybe could even apply an optimization to detect this?
 
@@ -77,9 +90,11 @@ void Scheduler::visit(const GPUTask &gpu_task) {
         buffer_handles.push_back(new_buffer);
     }
 
+    GPUBufferHandle output_buffer = buffer_handles.back();
+
     // Manage count buffer if requested, last buffer since it may or may not be included
     GPUBufferHandle count_buffer;
-    if (data_manager.get_buffer_count_request(gpu_task.output_id)) {
+    if (gpu_task.count_buffer_active) {
         // This allows for 8 bytes of counting (64 bit size_t)
         count_buffer = gpu_executor->allocate_buffer(COUNTER_BUFFER_SIZE, MemoryHint::HostVisible);
         buffer_handles.push_back(count_buffer);
@@ -89,19 +104,24 @@ void Scheduler::visit(const GPUTask &gpu_task) {
     // Needs to notify the event based scheduling loop once data has been fully received
     // What if the data can stay on the GPU between tasks, this would reduce overhead -> handling multiple
     // types of callbacks?
+
+    // In general *always* returning the computed back to the CPU is ineffecient
+    // Should instead return an event that signals when the computation is done and data can be fetched if desired
     std::function<void()> cpu_callback = [&]() {
         std::span<std::byte> output_span = data_manager.get_span_mut(gpu_task.output_id);
 
-        if (data_manager.get_buffer_count_request(gpu_task.output_id)) {
+        if (gpu_task.count_buffer_active) {
             std::vector<std::byte> byte_vec(COUNTER_BUFFER_SIZE);
             std::span<std::byte> counted_span(byte_vec);
-            gpu_executor->copy_from_device(counted_span, buffer_handles[-1], COUNTER_BUFFER_SIZE, true);
+            gpu_executor->copy_from_device(counted_span, count_buffer, COUNTER_BUFFER_SIZE, true);
 
-            size_t counted_bytes = bytes_to_val(counted_span);
+            size_t counted_bytes = count_bytes_to_size(counted_span);
             this->gpu_executor->copy_from_device(output_span, count_buffer, counted_bytes, false);
         } else {
-            this->gpu_executor->copy_from_device(output_span, buffer_handles[-1], output_size, false);
+            this->gpu_executor->copy_from_device(output_span, output_buffer, output_size, false);
         }
+
+        completed_queue.push_task(gpu_task.id);
     };
 
     // Assemble the kernel dispatch and assign it to the GPU
@@ -121,6 +141,8 @@ void Scheduler::visit(const GPUTask &gpu_task) {
  * TODO: Figure out how to incorporate Memory usages into scheduler
  *  - E.g. if memory is read/write only how can we apply optimizations?
  *
+ *  TODO: How should we implement priority among tasks?
+ *
  *  TODO: What if we instead make the Scheduler purely event driven, removing the need to wait on futures?
     //  - i.e. what if the CPU triggers a condition variable when the the task ends just like how Metal allows for
     //  completion handlers
@@ -133,13 +155,17 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
     int num_complete;
 
     std::queue<int> ready_queue;
-    std::vector<int> running_tasks;
+
+    // Goal is to use this for some sort of real-time monitoring of the system
+    // (Vector might not be best, but we should keep track of in-flight tasks for this)
+    std::unordered_set<int> running_tasks;
 
     for (int task : task_graph.get_task_ids()) {
         TaskState task_state;
         int num_dependencies = task_graph.get_dependencies(task).size();
         if (num_dependencies == 0) {
             task_state = TaskState::Ready;
+            ready_queue.push(task);
         } else {
             task_state = TaskState::Pending;
         }
@@ -151,8 +177,6 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
         // Dispatch loop - handle ready tasks
         // Shouldn't be while (!ready_queue.empty()) for a regular queue since may need to wait for CPU/GPU load to
         // decrease and don't want scheduler to hang waiting
-        // Instead employ a *priority queue* implementation (i.e. a heap structure)
-        // TODO: How should we order this priority queue?
         while (!ready_queue.empty()) {
             // TODO: 2. How can we effectively check for resources on CPU/GPU for scheduling?
             // Currently naive immediate scheduling approach
@@ -160,33 +184,20 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
             ready_queue.pop();
 
             task_graph.get_task(ready_task_id)->accept(*this);
-            running_tasks.push_back(ready_task_id);
+            running_tasks.insert(ready_task_id);
         }
 
-        // Event loop - handle efficiently waiting on running tasks
-        // TODO: Refactor IGPUExector to return a future for each kernel
-        if (!running_tasks.empty()) {
-            // TODO: How can we efficently wait for *any* task future to be finished?
-            // Currently just selects the first running task
-            auto running_task_id = running_tasks.front();
-            running_tasks.erase(running_tasks.begin());
-
-            /*
-             * TODO: Modify visit methods to return futures so this structure can work
-             *
-             * TODO: Future checking
-             * Should probably implement this using condition variables instead, so this whole section will get
-             * refactored
-             * General idea: Maintain a list of completed task ids and switch the running tasks vector to contain
-             * futures
-             *  - Maintain a worker thread that checks the running tasks for future completions and wakes up the main
-             * thread via a cond. var, pushing the completed task to the complete queue
-             *  - Core loop then runs dependency removal
-             */
-
+        // Prevents inefficient use of cycles on constant polling
+        // Allows us to choose the most recent task that finished
+        std::unique_lock<std::mutex> queue_lock = completed_queue.wait();
+        while (!completed_queue.data_queue.empty()) {
+            int completed_task = completed_queue.data_queue.front();
+            completed_queue.data_queue.pop();
             num_complete++;
-            graph_tasks[running_task_id].state = TaskState::Complete;
-            for (int dependent_id : task_graph.get_dependents(running_task_id)) {
+
+            graph_tasks[completed_task].state = TaskState::Complete;
+            running_tasks.erase(completed_task);
+            for (int dependent_id : task_graph.get_dependents(completed_task)) {
                 graph_tasks[dependent_id].num_dependencies--;
 
                 if (graph_tasks[dependent_id].num_dependencies == 0) {
@@ -194,5 +205,6 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
                 }
             }
         }
+        queue_lock.unlock();
     }
 }
