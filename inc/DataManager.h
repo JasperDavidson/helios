@@ -33,13 +33,13 @@ template <> struct std::hash<GPUBufferHandle> {
 template <typename T> class DataHandle {
   public:
     int id;
-    DataHandle(int id) : id(id) {};
 };
 
 enum class DataUsage { ReadWrite, ReadOnly };
 
 struct DataEntry {
     std::any data;
+    bool alias = false;
     size_t byte_size;
 
     // GPU Memory access hint
@@ -60,22 +60,27 @@ class DataManager {
         return std::any_cast<T>(data_map.at(data_handle.ID).data);
     }
     template <typename T>
-    DataHandle<T> create_data_handle(T &&data, const DataUsage &data_usage = DataUsage::ReadWrite,
+    DataHandle<T> create_data_handle(T data, const DataUsage &data_usage = DataUsage::ReadWrite,
                                      const MemoryHint &mem_hint = MemoryHint::DeviceLocal);
+
+    template <typename T>
+    DataHandle<T> create_ref_handle(T *data, const DataUsage &data_usage = DataUsage::ReadWrite,
+                                    const MemoryHint &mem_hint = MemoryHint::DeviceLocal);
 
     // Constructor for kernel output data of variable size
     // Will either use the max input size or requires user to set up buffer counting
     template <typename T>
-    DataHandle<T> create_date_handle(const DataUsage &data_usage = DataUsage::ReadWrite,
-                                     const MemoryHint &mem_hint = MemoryHint::HostVisible, size_t byte_size = 0);
+    DataHandle<T> create_variable_kernel_handle(const DataUsage &data_usage = DataUsage::ReadWrite,
+                                                const MemoryHint &mem_hint = MemoryHint::HostVisible,
+                                                size_t byte_size = 0);
 
-    void store_data(int data_id, std::any new_data) { data_map.at(data_id).data = new_data; };
+    void store_data(int data_id, std::any new_data);
 
-    std::span<const std::byte> get_span(int ID) const { return data_map.at(ID).const_data_accessor(); };
-    std::span<std::byte> get_span_mut(int ID);
-    int get_data_length(int ID) const { return data_map.at(ID).byte_size; };
-    const MemoryHint &get_mem_hint(int ID) const { return data_map.at(ID).mem_hint; };
-    const DataUsage &get_buffer_usage(int ID) const { return data_map.at(ID).data_usage; };
+    std::span<const std::byte> get_span(int data_id) const { return data_map.at(data_id).const_data_accessor(); };
+    std::span<std::byte> get_span_mut(int data_id);
+    int get_data_length(int data_id) const { return data_map.at(data_id).byte_size; };
+    const MemoryHint &get_mem_hint(int data_id) const { return data_map.at(data_id).mem_hint; };
+    const DataUsage &get_buffer_usage(int data_id) const { return data_map.at(data_id).data_usage; };
     const std::vector<DataEntry> &get_device_local_tasks() const { return device_local_tasks_; };
 
   private:

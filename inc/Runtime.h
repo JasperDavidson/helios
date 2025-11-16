@@ -20,7 +20,9 @@ enum class GPUBackend { Metal, Cuda };
 struct GPUDevice {
     GPUBackend backend;
     // implicit GPU to use (e.g. Metal), otherwise an ID should be provided (e.g. CUDA)
-    int device_id = -1;
+    int device_id;
+
+    GPUDevice(GPUBackend backend, int device_id = -1) : backend(backend), device_id(device_id) {};
 };
 
 /*

@@ -13,6 +13,7 @@ template <typename F, class... Types> void CPUTask<F, Types...>::accept(Schedule
 void GPUTask::accept(Scheduler &scheduler) { scheduler.visit(*this); }
 
 void TaskGraph::add_task(std::shared_ptr<ITask> task) {
+    task->id = task_id_inc++;
     all_tasks_[task->id] = task;
 
     // Mapping the output of the task to the task itself

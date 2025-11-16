@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -22,9 +23,9 @@ class ITask {
     int output_id;
     std::vector<DataUsage> data_usages;
 
-    ITask(int id, const std::string &task_name, const std::vector<int> &input_ids, int output_id,
+    ITask(const std::string &task_name, const std::vector<int> &input_ids, int output_id,
           const std::vector<DataUsage> &data_usages)
-        : id(id), task_name(task_name), input_ids(input_ids), output_id(output_id), data_usages(data_usages) {};
+        : task_name(task_name), input_ids(input_ids), output_id(output_id), data_usages(data_usages) {};
     ITask() = default;
 
     virtual void accept(Scheduler &scheduler) = 0;
@@ -34,9 +35,9 @@ template <typename F, class... Types> class CPUTask : public ITask {
   public:
     std::function<void()> task_lambda;
 
-    CPUTask(int ID, std::string task_name, const std::vector<int> &input_ids, int output_id, DataManager &data_manager,
+    CPUTask(std::string task_name, const std::vector<int> &input_ids, int output_id, DataManager &data_manager,
             const std::vector<DataUsage> &data_usages, F &&task, Types &&...args)
-        : ITask(ID, task_name, input_ids, output_id, data_usages) {
+        : ITask(task_name, input_ids, output_id, data_usages) {
         task_lambda = [=, task = std::forward<F>(task),
                        args_tuple = std::make_tuple(std::forward<Types>(args)...)]() mutable {
             // Bundle the input data
@@ -55,6 +56,10 @@ template <typename F, class... Types> class CPUTask : public ITask {
     void accept(Scheduler &scheduler) override;
 };
 
+template <typename F, class... Types>
+CPUTask(std::string, const std::vector<int> &, int, DataManager &, const std::vector<DataUsage> &, F &&, Types &&...)
+    -> CPUTask<std::decay_t<F>, Types...>;
+
 class GPUTask : public ITask {
     // TODO: How should we actually capture the data from the GPU?
     //  - Implement a callback lambda that gets ran after the kernel is compute, transport memory back to output handle
@@ -62,10 +67,10 @@ class GPUTask : public ITask {
     //  KEY CHANGE: User must specify output size of kernel if the output size will differ from size of input objects,
     //  or opt into buffer counting
   public:
-    GPUTask(int ID, const std::string &task_name, const std::vector<int> &input_ids,
-            const std::vector<DataUsage> &data_usages, int output_id, bool count_buffer_active,
-            const std::vector<int> &kernel_size, const std::vector<int> &threads_per_group)
-        : ITask(ID, task_name, input_ids, output_id, data_usages), count_buffer_active(count_buffer_active),
+    GPUTask(const std::string &task_name, const std::vector<int> &input_ids, const std::vector<DataUsage> &data_usages,
+            int output_id, bool count_buffer_active, const std::vector<int> &kernel_size,
+            const std::vector<int> &threads_per_group)
+        : ITask(task_name, input_ids, output_id, data_usages), count_buffer_active(count_buffer_active),
           kernel_size(kernel_size), threads_per_group(threads_per_group) {};
 
     std::vector<int> kernel_size;
@@ -116,6 +121,8 @@ class TaskGraph {
     std::vector<int> get_dependencies(int task_id) const { return dependencies_.at(task_id); };
 
   private:
+    int task_id_inc = 0;
+
     std::unordered_map<int, std::shared_ptr<ITask>> all_tasks_;
     std::unordered_map<int, std::vector<int>> dependencies_;
     std::unordered_map<int, std::vector<int>> dependents_;

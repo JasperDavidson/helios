@@ -30,7 +30,7 @@ template <typename F, class... Types> void Scheduler::visit(const CPUTask<F, Typ
         completed_queue.push_task(cpu_task.id);
     };
 
-    thread_pool->add_task(cpu_task.task_lambda);
+    thread_pool->add_task(lambda_with_completion);
 };
 
 void Scheduler::visit(const GPUTask &gpu_task) {
@@ -115,8 +115,6 @@ void Scheduler::visit(const GPUTask &gpu_task) {
     // In general *always* returning the computed back to the CPU is ineffecient
     // Should instead return an event that signals when the computation is done and data can be fetched if desired
     std::function<void()> cpu_callback = [&]() {
-        std::span<std::byte> output_span = data_manager.get_span_mut(gpu_task.output_id);
-
         if (gpu_task.count_buffer_active) {
             std::vector<std::byte> byte_vec(COUNTER_BUFFER_SIZE);
             std::span<std::byte> counted_span(byte_vec);
@@ -125,6 +123,7 @@ void Scheduler::visit(const GPUTask &gpu_task) {
             size_t counted_bytes = count_bytes_to_size(counted_span);
             this->gpu_executor->copy_from_device(output_span, count_buffer, counted_bytes, false);
         } else {
+            std::span<std::byte> output_span = data_manager.get_span_mut(gpu_task.output_id);
             this->gpu_executor->copy_from_device(output_span, output_buffer, output_size, false);
         }
 
