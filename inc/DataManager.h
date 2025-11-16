@@ -1,15 +1,39 @@
 #ifndef DATA_HANDLE_H
 #define DATA_HANDLE_H
 
-#include "IGPUExecutor.h"
 #include <any>
+#include <functional>
+#include <span>
 #include <unordered_map>
+
+// MemoryHint - How the data stored in the buffer will be treated throughout the lifetime of a task on a CPU/GPU level
+//  - Enables optimizations with private memory on the GPU, guarantee that only it has access to it
+enum class MemoryHint { DeviceLocal, HostVisible };
+
+class GPUBufferHandle {
+  public:
+    int id;
+    MemoryHint mem_hint;
+
+    GPUBufferHandle() = default;
+    GPUBufferHandle(int ID, MemoryHint mem_hint) : id(ID), mem_hint(mem_hint) {};
+    bool operator==(const GPUBufferHandle &other) const { return this->id == other.id; }
+};
+
+// GPUBufferHandle objects have effective hashes already since they store a unique ID
+namespace std {
+template <> struct std::hash<GPUBufferHandle> {
+    std::size_t operator()(const GPUBufferHandle &buffer_handle) const noexcept {
+        return std::hash<int>{}(buffer_handle.id);
+    }
+};
+} // namespace std
 
 // Templated DataHandle allows for associating types needed for std::any casts
 template <typename T> class DataHandle {
   public:
-    int ID;
-    DataHandle(int ID) : ID(ID) {};
+    int id;
+    DataHandle(int id) : id(id) {};
 };
 
 enum class DataUsage { ReadWrite, ReadOnly };

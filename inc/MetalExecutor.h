@@ -43,12 +43,15 @@ class MetalExecutor : public IGPUExecutor {
     // Helper functions for managing memory transfers
     GPUState blit_to_private(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
                              std::size_t data_size, bool sync);
-    GPUState memcpy_to_managed(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                               std::size_t data_size);
+    GPUState copy_to_shared(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
+                            std::size_t data_size);
+    GPUState copy_to_managed(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
+                             std::size_t data_size);
     GPUState private_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle, std::size_t data_size,
                             bool sync);
     GPUState managed_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle, std::size_t data_size,
                             bool sync);
+    GPUState shared_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle, std::size_t data_size);
 
     // Provides access to proxy buffer and extends size if needed
     GPUBufferHandle access_proxy(size_t data_size);

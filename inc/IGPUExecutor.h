@@ -1,6 +1,7 @@
 #ifndef IGPU_H
 #define IGPU_H
 
+#include "DataManager.h"
 #include <cstddef>
 #include <functional>
 #include <span>
@@ -8,34 +9,6 @@
 
 // TODO: Add more options as interface is built out
 enum class GPUState { GPUSuccess, GPUFailure, GhostBuffer, InvalidDispatchType };
-
-// Various states that can affect the level of optimization applied to memory buffers
-// BufferUsage - How the buffer will be accessed during GPU tasks, configurable so buffers can be reused
-// MemoryHint - How the data stored in the buffer will be treated throughout the lifetime of a task on a CPU/GPU level
-//  - Enables optimizations with private memory on the GPU, guarantee that only it has access to it
-
-// NOTE: Should BufferUsage be a more generalized data value? Might have some value on the CPU/other operations as well?
-// Buffer Usage used for Scheduling purposes primarily (e.g. two kernels can read from a buffer at the same time)
-enum class MemoryHint { DeviceLocal, HostVisible };
-
-class GPUBufferHandle {
-  public:
-    int ID;
-    MemoryHint mem_hint;
-
-    GPUBufferHandle() = default;
-    GPUBufferHandle(int ID, MemoryHint mem_hint) : ID(ID), mem_hint(mem_hint) {};
-    bool operator==(const GPUBufferHandle &other) const { return this->ID == other.ID; }
-};
-
-// GPUBufferHandle objects have effective hashes already since they store a unique ID
-namespace std {
-template <> struct std::hash<GPUBufferHandle> {
-    std::size_t operator()(const GPUBufferHandle &buffer_handle) const noexcept {
-        return std::hash<int>{}(buffer_handle.ID);
-    }
-};
-} // namespace std
 
 // Encapsulate information about kernels
 class KernelDispatch {
@@ -81,13 +54,21 @@ class IGPUExecutor {
     virtual int get_buffer_length(const GPUBufferHandle &buffer_handle) = 0;
 
     // Note this will default construct to false if value is not present - intended behavior here
-    bool get_kernel_status(const std::string &kernel_name) { return kernel_status[kernel_name]; }
+    bool get_kernel_status(const std::string &kernel_name) { return kernel_status_[kernel_name]; }
+
+    void map_data_to_buffer(int data_id, GPUBufferHandle &buffer_handle) { data_buffer_map_[data_id] = buffer_handle; }
+
+    bool data_buffer_exists(int data_id) { return data_buffer_map_.find(data_id) != data_buffer_map_.end(); }
 
     virtual ~IGPUExecutor() = default;
 
   protected:
     // Allows for the scheduler to check the status of kernels it has dispatched (kernel name -> future promise)
-    std::unordered_map<std::string, bool> kernel_status;
+    // Is this needed still?
+    std::unordered_map<std::string, bool> kernel_status_;
+
+    // This mapping allows for checking which data has already been allocated to a buffer
+    std::unordered_map<int, GPUBufferHandle> data_buffer_map_;
 };
 
 #endif

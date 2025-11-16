@@ -41,15 +41,20 @@ void Scheduler::visit(const GPUTask &gpu_task) {
 
     // Use multimap for better efficiency when searching for unused buffers
     for (const GPUBufferHandle &buffer_handle : buffers_not_in_use) {
-        size_to_buffer.emplace(data_manager.get_data_length(buffer_handle.ID), buffer_handle);
+        size_to_buffer.emplace(data_manager.get_data_length(buffer_handle.id), buffer_handle);
     }
 
     size_t max_input_size = 0;
     std::vector<GPUBufferHandle> buffer_handles;
     for (int i = 0; i < gpu_task.input_ids.size(); ++i) {
-        size_t input_data_size = data_manager.get_data_length(gpu_task.input_ids[i]);
-        MemoryHint data_mem_hint = data_manager.get_mem_hint(gpu_task.input_ids[i]);
-        auto input_data = data_manager.get_span(gpu_task.input_ids[i]);
+        int data_id = gpu_task.input_ids[i];
+        if (gpu_executor->data_buffer_exists(data_id)) {
+            continue;
+        }
+
+        size_t input_data_size = data_manager.get_data_length(data_id);
+        MemoryHint data_mem_hint = data_manager.get_mem_hint(data_id);
+        auto input_data = data_manager.get_span(data_id);
 
         // Maintain max input size if user doesn't specify other method for output size tracking
         max_input_size = std::max(max_input_size, input_data_size);
@@ -59,16 +64,18 @@ void Scheduler::visit(const GPUTask &gpu_task) {
         // TODO: Look into decoupling so the scheduler can overlay I/O and compute
         // Current serialization model is inefficient
 
+        GPUBufferHandle buffer_in_use;
         if (potential_buffer != size_to_buffer.end()) {
-            potential_buffer->second.mem_hint = data_mem_hint;
-            buffer_handles.push_back(potential_buffer->second);
-            gpu_executor->copy_to_device(input_data, potential_buffer->second, input_data_size, true);
+            buffer_in_use = potential_buffer->second;
+            buffer_in_use.mem_hint = data_mem_hint;
             size_to_buffer.erase(potential_buffer);
         } else {
-            GPUBufferHandle new_buffer = gpu_executor->allocate_buffer(input_data_size, data_mem_hint);
-            buffer_handles.push_back(new_buffer);
-            gpu_executor->copy_to_device(input_data, new_buffer, input_data_size, true);
+            buffer_in_use = gpu_executor->allocate_buffer(input_data_size, data_mem_hint);
         }
+
+        buffer_handles.push_back(buffer_in_use);
+        gpu_executor->copy_to_device(input_data, buffer_in_use, input_data_size, true);
+        gpu_executor->map_data_to_buffer(data_id, buffer_in_use);
     }
 
     // TODO: Should handle if output was marked as DeviceLocal and output is only intermediary for other GPU operation

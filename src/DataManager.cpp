@@ -10,6 +10,7 @@ std::span<std::byte> DataManager::get_span_mut(int ID) {
     if (data_map.at(ID).data_usage != DataUsage::ReadWrite) {
         throw std::runtime_error("Attempted to fetch mutable span into read-only data");
     }
+
     return data_map.at(ID).raw_data_accessor();
 };
 
@@ -82,4 +83,6 @@ DataHandle<T> DataManager::create_date_handle(const DataUsage &buffer_usage, con
     }
 
     data_map[data_handle.ID] = entry;
+
+    return data_handle;
 }
