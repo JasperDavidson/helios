@@ -2,8 +2,8 @@
 #define TASK_H
 
 #include "DataManager.h"
-#include "IGPUExecutor.h"
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+const int ROOT_NODE_ID = -1;
 
 // Forward declaration of Scheduler class
 class Scheduler;
@@ -31,14 +33,22 @@ class ITask {
     virtual void accept(Scheduler &scheduler) = 0;
 };
 
-template <typename F, class... Types> class CPUTask : public ITask {
+class BaseCPUTask : public ITask {
   public:
-    std::function<void()> task_lambda;
+    BaseCPUTask(const std::string &task_name, const std::vector<int> &input_ids, int output_id,
+                const std::vector<DataUsage> &data_usages)
+        : ITask(task_name, input_ids, output_id, data_usages) {};
 
-    CPUTask(std::string task_name, const std::vector<int> &input_ids, int output_id, DataManager &data_manager,
-            const std::vector<DataUsage> &data_usages, F &&task, Types &&...args)
-        : ITask(task_name, input_ids, output_id, data_usages) {
-        task_lambda = [=, task = std::forward<F>(task),
+    std::function<void()> task_lambda;
+    void accept(Scheduler &scheduler) override;
+};
+
+template <typename F, class... Types> class TypedCPUTask : public BaseCPUTask {
+  public:
+    TypedCPUTask(std::string task_name, const std::vector<int> &input_ids, int output_id, DataManager &data_manager,
+                 const std::vector<DataUsage> &data_usages, F &&task, Types &&...args)
+        : BaseCPUTask(task_name, input_ids, output_id, data_usages) {
+        task_lambda = [&data_manager, output_id, task = std::forward<F>(task),
                        args_tuple = std::make_tuple(std::forward<Types>(args)...)]() mutable {
             // Bundle the input data
             auto inputs = std::apply(
@@ -49,16 +59,14 @@ template <typename F, class... Types> class CPUTask : public ITask {
 
             // Store the results in the output handle
             data_manager.store_data(output_id, result);
+            std::cout << "Stored results" << std::endl;
         };
     };
-
-  private:
-    void accept(Scheduler &scheduler) override;
 };
 
 template <typename F, class... Types>
-CPUTask(std::string, const std::vector<int> &, int, DataManager &, const std::vector<DataUsage> &, F &&, Types &&...)
-    -> CPUTask<std::decay_t<F>, Types...>;
+TypedCPUTask(std::string, const std::vector<int> &, int, DataManager &, const std::vector<DataUsage> &, F &&,
+             Types &&...) -> TypedCPUTask<std::decay_t<F>, Types...>;
 
 class GPUTask : public ITask {
     // TODO: How should we actually capture the data from the GPU?
@@ -84,6 +92,7 @@ class GPUTask : public ITask {
 /*
  * TaskGraph
  * Represent tasks (nodes) and their dependencies (edges)
+ * Contains a root node with initial inputs such that root tasks aren't treated as having unfulfilled dependencies
  *
  *  So what should the task graph actually contain?
  *  Instance variables:
@@ -109,7 +118,12 @@ class GPUTask : public ITask {
  */
 class TaskGraph {
   public:
-    TaskGraph();
+    TaskGraph(const std::vector<int> &initial_input_ids) {
+        for (int init_input_id : initial_input_ids) {
+            data_producer_map_[init_input_id] = ROOT_NODE_ID;
+            dependents_[ROOT_NODE_ID].push_back(init_input_id);
+        }
+    };
 
     void add_task(std::shared_ptr<ITask> task);
     std::vector<int> find_ready() const;
@@ -117,8 +131,20 @@ class TaskGraph {
 
     std::vector<int> get_task_ids() const;
     std::shared_ptr<ITask> get_task(int task_id) const { return all_tasks_.at(task_id); };
-    std::vector<int> get_dependents(int task_id) const { return dependents_.at(task_id); };
-    std::vector<int> get_dependencies(int task_id) const { return dependencies_.at(task_id); };
+    std::vector<int> get_dependents(int task_id) const {
+        if (dependents_.find(task_id) != dependents_.end()) {
+            return dependents_.at(task_id);
+        }
+
+        return {};
+    };
+    std::vector<int> get_dependencies(int task_id) const {
+        if (dependencies_.find(task_id) != dependencies_.end()) {
+            return dependencies_.at(task_id);
+        }
+
+        return {};
+    };
 
   private:
     int task_id_inc = 0;

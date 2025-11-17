@@ -1,14 +1,13 @@
 #include "Tasks.h"
 #include "Scheduler.h"
 #include <deque>
+#include <iostream>
 #include <mach/task_info.h>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
 
-template <typename F, class... Types> void CPUTask<F, Types...>::accept(Scheduler &scheduler) {
-    scheduler.visit(*this);
-}
+void BaseCPUTask::accept(Scheduler &scheduler) { scheduler.visit(*this); }
 
 void GPUTask::accept(Scheduler &scheduler) { scheduler.visit(*this); }
 
@@ -16,34 +15,36 @@ void TaskGraph::add_task(std::shared_ptr<ITask> task) {
     task->id = task_id_inc++;
     all_tasks_[task->id] = task;
 
-    // Mapping the output of the task to the task itself
+    // Prevent assigning multiple tasks to one output
     if (data_producer_map_.find(task->output_id) != data_producer_map_.end()) {
         throw std::runtime_error(
             "Error during TaskGraph construction: Attempted to assign multiple tasks to one data output");
     }
 
+    // Mapping the output of the task to the task itself
     data_producer_map_[task->output_id] = task->id;
 
     for (int input_id : task->input_ids) {
-        // Marks the data as unfulfilled if no task has currently promised to produce it
         if (data_producer_map_.find(input_id) == data_producer_map_.end()) {
             unfulfilled_data_[input_id].push_back(task->id);
             continue;
         }
 
         int data_producer_id = data_producer_map_[input_id];
-        dependencies_[task->id].push_back(data_producer_id);
-        dependents_[data_producer_id].push_back(task->id);
-
-        // If the data was previously unfilled, mark it as filled and update the tasks that required it
-        if (unfulfilled_data_.find(input_id) != unfulfilled_data_.end()) {
-            for (int unfulfilled_task_id : unfulfilled_data_[input_id]) {
-                dependencies_[unfulfilled_task_id].push_back(task->id);
-                dependents_[task->id].push_back(unfulfilled_task_id);
-            }
-
-            unfulfilled_data_.erase(input_id);
+        if (data_producer_id != ROOT_NODE_ID) {
+            dependencies_[task->id].push_back(data_producer_id);
+            dependents_[data_producer_id].push_back(task->id);
         }
+    }
+
+    // If the data was previously unfilled, mark it as filled and update the tasks that required it
+    if (unfulfilled_data_.find(task->output_id) != unfulfilled_data_.end()) {
+        for (int unfulfilled_task_id : unfulfilled_data_[task->output_id]) {
+            dependencies_[unfulfilled_task_id].push_back(task->id);
+            dependents_[task->id].push_back(unfulfilled_task_id);
+        }
+
+        unfulfilled_data_.erase(task->output_id);
     }
 }
 
@@ -69,12 +70,11 @@ std::vector<int> TaskGraph::get_task_ids() const {
 }
 
 void TaskGraph::validate_graph() {
-    bool no_unfulfilled_data = unfulfilled_data_.empty();
-    if (unfulfilled_data_.empty()) {
+    if (!unfulfilled_data_.empty()) {
         // TODO: Refactor to pass back more information about what data was unfulfilled
         throw std::runtime_error("Failed to validate task graph: Data Unfulfillment error");
     }
-    std::vector<int> root_nodes = find_ready();
+    std::vector<int> root_nodes = dependents_[ROOT_NODE_ID];
 
     // Check for cycles utilizing topological sort
     std::deque<int> task_queue(root_nodes.begin(), root_nodes.end());
@@ -103,4 +103,6 @@ void TaskGraph::validate_graph() {
     if (task_queue.size() != all_tasks_.size()) {
         std::runtime_error("Failed to validate task graph: Cyclic task dependency detected");
     }
+
+    std::cout << "Graph Validated" << std::endl;
 }

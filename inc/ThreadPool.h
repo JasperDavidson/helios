@@ -4,11 +4,11 @@
 #include <condition_variable>
 #include <functional>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
-#include <type_traits>
 
 class ThreadPool {
   public:
@@ -16,8 +16,7 @@ class ThreadPool {
     ThreadPool() {};
     ~ThreadPool();
 
-    template <typename F, class... Types>
-    auto add_task(F &&task /*, Types &&...task_args */) -> std::future<std::invoke_result_t<F, Types...>> {
+    template <typename Callable> std::future<void> add_task(Callable &task /*, Types &&...task_args */) {
         // Wrap the task call with its arguments inside a lambda such that the queue
         // can always store consistent type of std::function<void()>
 
@@ -33,6 +32,8 @@ class ThreadPool {
 
         // Only purpose now should be to notify the scheduler that the task is done - data storage handled *in task*
         // TODO: Refactor this for event driven tasks
+        // Do we still need this packaged task? Currently just directly passing task
+        //  - Really is a question of if the future is useful to us
         std::shared_ptr<std::packaged_task<void()>> task_package = std::make_shared<std::packaged_task<void()>>(task);
         std::future<void> task_future = task_package->get_future();
 
@@ -42,7 +43,8 @@ class ThreadPool {
             // Lock the mutex, emplace the task into the queue, then unlock the mutex
             // This prevents threads from accessing the queue as tasks are being added
             std::unique_lock<std::mutex> lock(queue_mtx_);
-            task_queue_.emplace(wrapper);
+            task_queue_.emplace(task);
+            std::cout << "Task placed in queue" << std::endl;
         }
 
         // Notify just one thread (undeterministic) that the task queue is ready to

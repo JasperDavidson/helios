@@ -56,6 +56,14 @@ add_library(Helios_Engine STATIC src/Scheduler.cpp src/Runtime.cpp)
 target_include_directories(Helios_Engine PUBLIC inc)
 target_link_libraries(Helios_Engine PUBLIC Helios_Core Helios_ThreadPool)
 
+add_executable(user_test lidar/main.cpp)
+target_include_directories(user_test PUBLIC inc)
+target_link_libraries(
+	user_test PRIVATE
+	Helios_Engine
+	Helios_MetalExecutor
+)
+
 # include(FetchContent)
 # FetchContent_Declare(
 #   googletest

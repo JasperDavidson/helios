@@ -1,9 +1,11 @@
 #ifndef DATA_HANDLE_H
 #define DATA_HANDLE_H
 
+#include "TypeTraits.h"
 #include <any>
 #include <functional>
 #include <span>
+#include <type_traits>
 #include <unordered_map>
 
 // MemoryHint - How the data stored in the buffer will be treated throughout the lifetime of a task on a CPU/GPU level
@@ -16,7 +18,7 @@ class GPUBufferHandle {
     MemoryHint mem_hint;
 
     GPUBufferHandle() = default;
-    GPUBufferHandle(int ID, MemoryHint mem_hint) : id(ID), mem_hint(mem_hint) {};
+    GPUBufferHandle(int id, MemoryHint mem_hint) : id(id), mem_hint(mem_hint) {};
     bool operator==(const GPUBufferHandle &other) const { return this->id == other.id; }
 };
 
@@ -57,22 +59,132 @@ struct DataEntry {
 class DataManager {
   public:
     template <typename T> T get_data(DataHandle<T> data_handle) const {
-        return std::any_cast<T>(data_map.at(data_handle.ID).data);
+        return std::any_cast<T>(data_map.at(data_handle.id).data);
     }
+
     template <typename T>
     DataHandle<T> create_data_handle(T data, const DataUsage &data_usage = DataUsage::ReadWrite,
-                                     const MemoryHint &mem_hint = MemoryHint::DeviceLocal);
+                                     const MemoryHint &mem_hint = MemoryHint::HostVisible) {
+        DataEntry entry;
+        DataHandle<T> data_handle;
+
+        auto data_ptr = &data;
+
+        entry.data = std::make_any<T>(data);
+        entry.mem_hint = mem_hint;
+        entry.data_usage = data_usage;
+
+        // If true then T is a container type, else it's size can be found through sizeof() at compile time
+        if constexpr (isContiguousContainer<T>::value) {
+            size_t byte_size = data_ptr->size() * sizeof(typename T::value_type);
+            entry.byte_size = byte_size;
+            entry.const_data_accessor = [&data_ptr, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data_ptr->data()), byte_size);
+            };
+
+            if (data_usage == DataUsage::ReadWrite) {
+                entry.raw_data_accessor = [&data_ptr, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data_ptr->data()), byte_size);
+                };
+            }
+        } else {
+            size_t byte_size = sizeof(T);
+            entry.byte_size = byte_size;
+            entry.const_data_accessor = [&data_ptr, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data_ptr), byte_size);
+            };
+
+            if (data_usage == DataUsage::ReadWrite) {
+                entry.raw_data_accessor = [&data_ptr, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data_ptr), byte_size);
+                };
+            }
+        }
+
+        data_handle.id = id_counter++;
+        data_map[data_handle.id] = entry;
+
+        if (mem_hint == MemoryHint::DeviceLocal) {
+            device_local_tasks_.push_back(entry);
+        }
+
+        return data_handle;
+    }
 
     template <typename T>
     DataHandle<T> create_ref_handle(T *data, const DataUsage &data_usage = DataUsage::ReadWrite,
-                                    const MemoryHint &mem_hint = MemoryHint::DeviceLocal);
+                                    const MemoryHint &mem_hint = MemoryHint::DeviceLocal) {
+        DataEntry entry;
+        DataHandle<T> data_handle;
 
-    // Constructor for kernel output data of variable size
-    // Will either use the max input size or requires user to set up buffer counting
+        auto data_ptr = data;
+        entry.alias = true;
+
+        entry.data = std::make_any<T>(*data);
+        entry.mem_hint = mem_hint;
+        entry.data_usage = data_usage;
+
+        // If true then T is a container type, else it's size can be found through sizeof() at compile time
+        using data_type = std::remove_pointer<decltype(data)>::type;
+        if constexpr (isContiguousContainer<data_type>::value) {
+            size_t byte_size = data_ptr->size() * sizeof(typename data_type::value_type);
+            entry.byte_size = byte_size;
+            entry.const_data_accessor = [data_ptr, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data_ptr->data()), byte_size);
+            };
+
+            if (data_usage == DataUsage::ReadWrite) {
+                entry.raw_data_accessor = [data_ptr, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data_ptr->data()), byte_size);
+                };
+            }
+        } else {
+            size_t byte_size = sizeof(data_type);
+            entry.byte_size = byte_size;
+            entry.const_data_accessor = [data_ptr, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data_ptr), byte_size);
+            };
+
+            if (data_usage == DataUsage::ReadWrite) {
+                entry.raw_data_accessor = [data_ptr, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data_ptr), byte_size);
+                };
+            }
+        }
+
+        data_handle.id = id_counter++;
+        data_map[data_handle.id] = entry;
+
+        if (mem_hint == MemoryHint::DeviceLocal) {
+            device_local_tasks_.push_back(entry);
+        }
+
+        return data_handle;
+    }
+
+    // NOTE: Effectively acts as a "placeholder" handle. When the data is passed back from the GPU, create a new "real"
+    // data handle as above, and replace this one's position in the map
+    // - Maintains a clear structure since the user always interaces with DataHandle objects
     template <typename T>
-    DataHandle<T> create_variable_kernel_handle(const DataUsage &data_usage = DataUsage::ReadWrite,
-                                                const MemoryHint &mem_hint = MemoryHint::HostVisible,
-                                                size_t byte_size = 0);
+    DataHandle<T> create_variable_kernel_handle(const DataUsage &buffer_usage, const MemoryHint &mem_hint,
+                                                size_t byte_size) {
+        DataEntry entry;
+        DataHandle<T> data_handle;
+
+        entry.mem_hint = mem_hint;
+        entry.data_usage = buffer_usage;
+        entry.byte_size = byte_size;
+
+        data_handle.id = id_counter++;
+
+        if (mem_hint == MemoryHint::DeviceLocal) {
+            device_local_tasks_.push_back(entry);
+        }
+
+        data_map[data_handle.id] = entry;
+
+        return data_handle;
+    }
 
     void store_data(int data_id, std::any new_data);
 

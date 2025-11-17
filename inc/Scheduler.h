@@ -16,7 +16,7 @@ class Scheduler {
         : data_manager(data_manager), thread_pool(thread_pool), gpu_executor(gpu_executor) {};
 
     // TODO: For both visit methods, implement event polling -> wrap in a lambda that pushes to thread safe queue
-    template <typename F, class... Types> void visit(const CPUTask<F, Types...> &cpu_task);
+    void visit(const BaseCPUTask &cpu_task);
     void visit(const GPUTask &gpu_task);
 
     bool check_kernel_status(const std::string &kernel_name) { return gpu_executor->get_kernel_status(kernel_name); }
@@ -50,7 +50,7 @@ class Scheduler {
     };
 
     CompletionQueue completed_queue;
-    DataManager data_manager;
+    DataManager &data_manager;
     std::unique_ptr<ThreadPool> &thread_pool;
     std::unique_ptr<IGPUExecutor> &gpu_executor;
 };

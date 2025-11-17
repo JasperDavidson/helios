@@ -5,6 +5,7 @@
 #include "Tasks.h"
 #include <algorithm>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <queue>
@@ -24,9 +25,14 @@ size_t count_bytes_to_size(const std::span<std::byte> bytes) {
     return val;
 }
 
-template <typename F, class... Types> void Scheduler::visit(const CPUTask<F, Types...> &cpu_task) {
-    auto lambda_with_completion = [this](const CPUTask<F, Types...> &cpu_task) {
+// URGENT: Look into actually tracking CPU return future
+// Just ake sure "lambda with completion" idea actually makes sense
+void Scheduler::visit(const BaseCPUTask &cpu_task) {
+    std::cout << "Visiting CPU Task" << std::endl;
+
+    auto lambda_with_completion = [this, &cpu_task] {
         cpu_task.task_lambda();
+        std::cout << "Executed task!" << std::endl;
         completed_queue.push_task(cpu_task.id);
     };
 
@@ -116,11 +122,16 @@ void Scheduler::visit(const GPUTask &gpu_task) {
     // Should instead return an event that signals when the computation is done and data can be fetched if desired
     std::function<void()> cpu_callback = [&]() {
         if (gpu_task.count_buffer_active) {
+            // Find the number of bytes used for GPU output
             std::vector<std::byte> byte_vec(COUNTER_BUFFER_SIZE);
             std::span<std::byte> counted_span(byte_vec);
             gpu_executor->copy_from_device(counted_span, count_buffer, COUNTER_BUFFER_SIZE, true);
-
             size_t counted_bytes = count_bytes_to_size(counted_span);
+
+            // Allocate memory/span on CPU for GPU output
+            // This is the earliest we could possibly form the span since only now we know the size
+            std::byte byte_array[counted_bytes];
+            std::span<std::byte> output_span(byte_array, counted_bytes);
             this->gpu_executor->copy_from_device(output_span, count_buffer, counted_bytes, false);
         } else {
             std::span<std::byte> output_span = data_manager.get_span_mut(gpu_task.output_id);
@@ -158,7 +169,7 @@ void Scheduler::visit(const GPUTask &gpu_task) {
 void Scheduler::execute_graph(const TaskGraph &task_graph) {
     // Map that indicates each tasks current state, and ensure the root tasks (no dependencies) are ready for exec
     std::unordered_map<int, TaskRuntimeState> graph_tasks;
-    int num_complete;
+    int num_complete = 0;
 
     std::queue<int> ready_queue;
 
@@ -166,19 +177,28 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
     // (Vector might not be best, but we should keep track of in-flight tasks for this)
     std::unordered_set<int> running_tasks;
 
-    for (int task : task_graph.get_task_ids()) {
+    for (int task_id : task_graph.get_task_ids()) {
         TaskState task_state;
-        int num_dependencies = task_graph.get_dependencies(task).size();
+        int num_dependencies = task_graph.get_dependencies(task_id).size();
+        std::cout << "Task ID: " << task_id << "\t# Dependencies: " << num_dependencies << std::endl;
         if (num_dependencies == 0) {
             task_state = TaskState::Ready;
-            ready_queue.push(task);
+            ready_queue.push(task_id);
         } else {
             task_state = TaskState::Pending;
         }
 
-        graph_tasks[task] = TaskRuntimeState(task_state, num_dependencies);
+        graph_tasks[task_id] = TaskRuntimeState(task_state, num_dependencies);
     }
 
+    for (const auto &task_state_pair : graph_tasks) {
+        if (task_state_pair.second.state == TaskState::Ready) {
+            std::cout << "Task " << task_state_pair.first << " is ready!" << std::endl;
+        }
+    }
+
+    std::cout << "Num complete: " << num_complete << std::endl;
+    std::cout << "Graph size: " << graph_tasks.size() << std::endl;
     while (num_complete < graph_tasks.size()) {
         // Dispatch loop - handle ready tasks
         // Shouldn't be while (!ready_queue.empty()) for a regular queue since may need to wait for CPU/GPU load to
@@ -189,12 +209,15 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
             int ready_task_id = ready_queue.front();
             ready_queue.pop();
 
+            std::cout << "Before accept" << std::endl;
             task_graph.get_task(ready_task_id)->accept(*this);
+            std::cout << "After accept" << std::endl;
             running_tasks.insert(ready_task_id);
         }
 
         // Prevents inefficient use of cycles on constant polling
         // Allows us to choose the most recent task that finished
+        std::cout << "Waiting to acquire lock" << std::endl;
         std::unique_lock<std::mutex> queue_lock = completed_queue.wait();
         while (!completed_queue.data_queue.empty()) {
             int completed_task = completed_queue.data_queue.front();
