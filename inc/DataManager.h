@@ -59,7 +59,13 @@ struct DataEntry {
 class DataManager {
   public:
     template <typename T> T get_data(DataHandle<T> data_handle) const {
-        return std::any_cast<T>(data_map.at(data_handle.id).data);
+        auto any_data = data_map.at(data_handle.id).data;
+
+        if (any_data.type() == typeid(T)) {
+            return std::any_cast<T>(any_data);
+        } else if (any_data.type() == typeid(std::reference_wrapper<T>)) {
+            return std::any_cast<std::reference_wrapper<T>>(any_data).get();
+        }
     }
 
     template <typename T>
@@ -68,35 +74,36 @@ class DataManager {
         DataEntry entry;
         DataHandle<T> data_handle;
 
-        auto data_ptr = &data;
-
+        // Make a copy of the data for the any object, then sassign a reference to fetch via lambda access below
         entry.data = std::make_any<T>(data);
+        auto lambda_data = &std::any_cast<T &>(entry.data);
+
         entry.mem_hint = mem_hint;
         entry.data_usage = data_usage;
 
-        // If true then T is a container type, else it's size can be found through sizeof() at compile time
+        // If true then T is a container type, else its size can be found through sizeof() at compile time
         if constexpr (isContiguousContainer<T>::value) {
-            size_t byte_size = data_ptr->size() * sizeof(typename T::value_type);
+            size_t byte_size = lambda_data->size() * sizeof(typename T::value_type);
             entry.byte_size = byte_size;
-            entry.const_data_accessor = [&data_ptr, byte_size]() {
-                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data_ptr->data()), byte_size);
+            entry.const_data_accessor = [lambda_data, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(lambda_data->data()), byte_size);
             };
 
             if (data_usage == DataUsage::ReadWrite) {
-                entry.raw_data_accessor = [&data_ptr, byte_size]() {
-                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data_ptr->data()), byte_size);
+                entry.raw_data_accessor = [lambda_data, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(lambda_data->data()), byte_size);
                 };
             }
         } else {
             size_t byte_size = sizeof(T);
             entry.byte_size = byte_size;
-            entry.const_data_accessor = [&data_ptr, byte_size]() {
-                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data_ptr), byte_size);
+            entry.const_data_accessor = [lambda_data, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(lambda_data), byte_size);
             };
 
             if (data_usage == DataUsage::ReadWrite) {
-                entry.raw_data_accessor = [&data_ptr, byte_size]() {
-                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data_ptr), byte_size);
+                entry.raw_data_accessor = [lambda_data, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(lambda_data), byte_size);
                 };
             }
         }
@@ -117,37 +124,35 @@ class DataManager {
         DataEntry entry;
         DataHandle<T> data_handle;
 
-        auto data_ptr = data;
         entry.alias = true;
+        entry.data = std::make_any<std::reference_wrapper<T>>(std::ref(*data));
 
-        entry.data = std::make_any<T>(*data);
         entry.mem_hint = mem_hint;
         entry.data_usage = data_usage;
 
         // If true then T is a container type, else it's size can be found through sizeof() at compile time
-        using data_type = std::remove_pointer<decltype(data)>::type;
-        if constexpr (isContiguousContainer<data_type>::value) {
-            size_t byte_size = data_ptr->size() * sizeof(typename data_type::value_type);
+        if constexpr (isContiguousContainer<T>::value) {
+            size_t byte_size = data->size() * sizeof(typename T::value_type);
             entry.byte_size = byte_size;
-            entry.const_data_accessor = [data_ptr, byte_size]() {
-                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data_ptr->data()), byte_size);
+            entry.const_data_accessor = [data, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data->data()), byte_size);
             };
 
             if (data_usage == DataUsage::ReadWrite) {
-                entry.raw_data_accessor = [data_ptr, byte_size]() {
-                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data_ptr->data()), byte_size);
+                entry.raw_data_accessor = [data, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data->data()), byte_size);
                 };
             }
         } else {
-            size_t byte_size = sizeof(data_type);
+            size_t byte_size = sizeof(T);
             entry.byte_size = byte_size;
-            entry.const_data_accessor = [data_ptr, byte_size]() {
-                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data_ptr), byte_size);
+            entry.const_data_accessor = [data, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data), byte_size);
             };
 
             if (data_usage == DataUsage::ReadWrite) {
-                entry.raw_data_accessor = [data_ptr, byte_size]() {
-                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data_ptr), byte_size);
+                entry.raw_data_accessor = [data, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(data), byte_size);
                 };
             }
         }
@@ -192,7 +197,7 @@ class DataManager {
     std::span<std::byte> get_span_mut(int data_id);
     int get_data_length(int data_id) const { return data_map.at(data_id).byte_size; };
     const MemoryHint &get_mem_hint(int data_id) const { return data_map.at(data_id).mem_hint; };
-    const DataUsage &get_buffer_usage(int data_id) const { return data_map.at(data_id).data_usage; };
+    const DataUsage &get_data_usage(int data_id) const { return data_map.at(data_id).data_usage; };
     const std::vector<DataEntry> &get_device_local_tasks() const { return device_local_tasks_; };
 
   private:
