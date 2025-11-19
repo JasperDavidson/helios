@@ -160,7 +160,6 @@ class DataManager {
 
             if (data_usage == DataUsage::ReadWrite) {
                 entry.raw_data_accessor = [data, byte_size]() {
-                    std::cout << "Data value when accessing raw: " << *data << std::endl;
                     return std::span<std::byte>(reinterpret_cast<std::byte *>(data), byte_size);
                 };
             }

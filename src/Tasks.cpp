@@ -103,6 +103,4 @@ void TaskGraph::validate_graph() {
     if (task_queue.size() != all_tasks_.size()) {
         std::runtime_error("Failed to validate task graph: Cyclic task dependency detected");
     }
-
-    std::cout << "Graph Validated" << std::endl;
 }

@@ -13,6 +13,7 @@
 #include <vector>
 
 const int ROOT_NODE_ID = -1;
+const int VOID_RETURN = -1;
 
 // Forward declaration of Scheduler class
 class Scheduler;
@@ -51,15 +52,18 @@ template <typename F, class... Types> class TypedCPUTask : public BaseCPUTask {
         task_lambda = [&data_manager, output_id, task = std::forward<F>(task),
                        args_tuple = std::make_tuple(std::forward<Types>(args)...)]() mutable {
             // Bundle the input data
-            auto inputs = std::apply(
-                [&](auto &&...handles) { return std::make_tuple(data_manager.get_data(handles)...); }, args_tuple);
+            auto inputs =
+                std::apply([&](auto &&...handles) { return std::forward_as_tuple(data_manager.get_data(handles)...); },
+                           args_tuple);
 
-            // Compute the results
-            auto result = std::apply(task, inputs);
-
-            // Store the results in the output handle
-            data_manager.store_data(output_id, result);
-            std::cout << "Stored results" << std::endl;
+            // Store the results in the output handle if non-void return type
+            using ReturnType = decltype(std::apply(task, inputs));
+            if constexpr (std::is_void_v<ReturnType>) {
+                std::apply(task, inputs);
+            } else {
+                auto result = std::apply(task, inputs);
+                data_manager.store_data(output_id, result);
+            }
         };
     };
 };

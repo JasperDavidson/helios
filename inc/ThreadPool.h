@@ -44,7 +44,6 @@ class ThreadPool {
             // This prevents threads from accessing the queue as tasks are being added
             std::unique_lock<std::mutex> lock(queue_mtx_);
             task_queue_.emplace(task);
-            std::cout << "Task placed in queue" << std::endl;
         }
 
         // Notify just one thread (undeterministic) that the task queue is ready to

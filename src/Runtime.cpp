@@ -40,6 +40,5 @@ void Runtime::commit_graph(TaskGraph &task_graph, GPUDevice &device_info) {
     create_thread_pool_();
 
     Scheduler graph_scheduler = Scheduler(data_manager_, thread_pool_, gpu_exec_);
-    std::cout << "Scheduler constructed" << std::endl;
     graph_scheduler.execute_graph(task_graph);
 };

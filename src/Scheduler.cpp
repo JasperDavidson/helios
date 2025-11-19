@@ -28,8 +28,6 @@ size_t count_bytes_to_size(const std::span<std::byte> bytes) {
 // URGENT: Look into actually tracking CPU return future
 // Just ake sure "lambda with completion" idea actually makes sense
 void Scheduler::visit(const BaseCPUTask &cpu_task) {
-    std::cout << "Visiting CPU Task" << std::endl;
-
     auto lambda_with_completion = [this, &cpu_task] {
         cpu_task.task_lambda();
         completed_queue.push_task(cpu_task.id);
@@ -179,7 +177,6 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
     for (int task_id : task_graph.get_task_ids()) {
         TaskState task_state;
         int num_dependencies = task_graph.get_dependencies(task_id).size();
-        std::cout << "Task ID: " << task_id << "\t# Dependencies: " << num_dependencies << std::endl;
         if (num_dependencies == 0) {
             task_state = TaskState::Ready;
             ready_queue.push(task_id);
@@ -190,14 +187,6 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
         graph_tasks[task_id] = TaskRuntimeState(task_state, num_dependencies);
     }
 
-    for (const auto &task_state_pair : graph_tasks) {
-        if (task_state_pair.second.state == TaskState::Ready) {
-            std::cout << "Task " << task_state_pair.first << " is ready!" << std::endl;
-        }
-    }
-
-    std::cout << "Num complete: " << num_complete << std::endl;
-    std::cout << "Graph size: " << graph_tasks.size() << std::endl;
     while (num_complete < graph_tasks.size()) {
         // Dispatch loop - handle ready tasks
         // Shouldn't be while (!ready_queue.empty()) for a regular queue since may need to wait for CPU/GPU load to
@@ -208,19 +197,14 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
             int ready_task_id = ready_queue.front();
             ready_queue.pop();
 
-            std::cout << "Before accept" << std::endl;
             task_graph.get_task(ready_task_id)->accept(*this);
-            std::cout << "After accept" << std::endl;
             running_tasks.insert(ready_task_id);
         }
 
         // Prevents inefficient use of cycles on constant polling
         // Allows us to choose the most recent task that finished
-        std::cout << "Waiting to acquire lock" << std::endl;
         std::unique_lock<std::mutex> queue_lock = completed_queue.wait();
-        std::cout << "Lock acquired" << std::endl;
         while (!completed_queue.data_queue.empty()) {
-            std::cout << "Processing completed data" << std::endl;
             int completed_task = completed_queue.data_queue.front();
             completed_queue.data_queue.pop();
             num_complete++;
@@ -234,12 +218,7 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
                     ready_queue.push(dependent_id);
                 }
             }
-
-            std::cout << "Processed completed data" << std::endl;
         }
         queue_lock.unlock();
-        std::cout << "Unlocked, tasks completed: " << num_complete << " / " << graph_tasks.size() << std::endl;
     }
-
-    std::cout << "All tasks processed" << std::endl;
 }
