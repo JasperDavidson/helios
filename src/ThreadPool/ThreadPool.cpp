@@ -48,5 +48,6 @@ void ThreadPool::worker_loop() {
         }
 
         task();
+        std::cout << "Executed task in thread pool!" << std::endl;
     }
 }

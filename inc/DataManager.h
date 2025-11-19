@@ -4,8 +4,9 @@
 #include "TypeTraits.h"
 #include <any>
 #include <functional>
+#include <iostream>
 #include <span>
-#include <type_traits>
+#include <stdexcept>
 #include <unordered_map>
 
 // MemoryHint - How the data stored in the buffer will be treated throughout the lifetime of a task on a CPU/GPU level
@@ -58,14 +59,17 @@ struct DataEntry {
 // DataManager object allows for caching of DataHandles to their actual objects
 class DataManager {
   public:
-    template <typename T> T get_data(DataHandle<T> data_handle) const {
-        auto any_data = data_map.at(data_handle.id).data;
+    template <typename T> T &get_data(DataHandle<T> data_handle) {
+        auto &any_data = data_map.at(data_handle.id).data;
 
-        if (any_data.type() == typeid(T)) {
-            return std::any_cast<T>(any_data);
+        if (any_data.type() == typeid(std::shared_ptr<T>)) {
+            auto &any_ptr = std::any_cast<std::shared_ptr<T> &>(any_data);
+            return *any_ptr;
         } else if (any_data.type() == typeid(std::reference_wrapper<T>)) {
             return std::any_cast<std::reference_wrapper<T>>(any_data).get();
         }
+
+        throw std::runtime_error("Trying to match data handle ID to mismatched type!");
     }
 
     template <typename T>
@@ -74,36 +78,40 @@ class DataManager {
         DataEntry entry;
         DataHandle<T> data_handle;
 
-        // Make a copy of the data for the any object, then sassign a reference to fetch via lambda access below
-        entry.data = std::make_any<T>(data);
-        auto lambda_data = &std::any_cast<T &>(entry.data);
+        // Move the data onto the heap immediately via shared pointer
+        // This verifies the address of the data never changes even if entry is copied/moved
+        auto data_ptr = std::make_shared<T>(std::move(data));
+        entry.data = data_ptr;
+        T *raw_ptr = data_ptr.get();
 
         entry.mem_hint = mem_hint;
         entry.data_usage = data_usage;
 
         // If true then T is a container type, else its size can be found through sizeof() at compile time
-        if constexpr (isContiguousContainer<T>::value) {
-            size_t byte_size = lambda_data->size() * sizeof(typename T::value_type);
+        if constexpr (ContiguousContainer<T>) {
+            size_t byte_size = raw_ptr->size() * sizeof(typename T::value_type);
             entry.byte_size = byte_size;
-            entry.const_data_accessor = [lambda_data, byte_size]() {
-                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(lambda_data->data()), byte_size);
+
+            entry.const_data_accessor = [raw_ptr, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(raw_ptr->data()), byte_size);
             };
 
             if (data_usage == DataUsage::ReadWrite) {
-                entry.raw_data_accessor = [lambda_data, byte_size]() {
-                    return std::span<std::byte>(reinterpret_cast<std::byte *>(lambda_data->data()), byte_size);
+                entry.raw_data_accessor = [raw_ptr, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(raw_ptr->data()), byte_size);
                 };
             }
         } else {
             size_t byte_size = sizeof(T);
             entry.byte_size = byte_size;
-            entry.const_data_accessor = [lambda_data, byte_size]() {
-                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(lambda_data), byte_size);
+
+            entry.const_data_accessor = [raw_ptr, byte_size]() {
+                return std::span<const std::byte>(reinterpret_cast<const std::byte *>(raw_ptr), byte_size);
             };
 
             if (data_usage == DataUsage::ReadWrite) {
-                entry.raw_data_accessor = [lambda_data, byte_size]() {
-                    return std::span<std::byte>(reinterpret_cast<std::byte *>(lambda_data), byte_size);
+                entry.raw_data_accessor = [raw_ptr, byte_size]() {
+                    return std::span<std::byte>(reinterpret_cast<std::byte *>(raw_ptr), byte_size);
                 };
             }
         }
@@ -131,7 +139,7 @@ class DataManager {
         entry.data_usage = data_usage;
 
         // If true then T is a container type, else it's size can be found through sizeof() at compile time
-        if constexpr (isContiguousContainer<T>::value) {
+        if constexpr (ContiguousContainer<T>) {
             size_t byte_size = data->size() * sizeof(typename T::value_type);
             entry.byte_size = byte_size;
             entry.const_data_accessor = [data, byte_size]() {
@@ -152,6 +160,7 @@ class DataManager {
 
             if (data_usage == DataUsage::ReadWrite) {
                 entry.raw_data_accessor = [data, byte_size]() {
+                    std::cout << "Data value when accessing raw: " << *data << std::endl;
                     return std::span<std::byte>(reinterpret_cast<std::byte *>(data), byte_size);
                 };
             }
@@ -191,7 +200,10 @@ class DataManager {
         return data_handle;
     }
 
-    void store_data(int data_id, std::any new_data);
+    template <typename T> void store_data(int data_id, const T &new_data) {
+        auto raw_data = get_span_mut(data_id);
+        memcpy(raw_data.data(), &new_data, raw_data.size());
+    };
 
     std::span<const std::byte> get_span(int data_id) const { return data_map.at(data_id).const_data_accessor(); };
     std::span<std::byte> get_span_mut(int data_id);

@@ -32,7 +32,6 @@ void Scheduler::visit(const BaseCPUTask &cpu_task) {
 
     auto lambda_with_completion = [this, &cpu_task] {
         cpu_task.task_lambda();
-        std::cout << "Executed task!" << std::endl;
         completed_queue.push_task(cpu_task.id);
     };
 
@@ -219,7 +218,9 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
         // Allows us to choose the most recent task that finished
         std::cout << "Waiting to acquire lock" << std::endl;
         std::unique_lock<std::mutex> queue_lock = completed_queue.wait();
+        std::cout << "Lock acquired" << std::endl;
         while (!completed_queue.data_queue.empty()) {
+            std::cout << "Processing completed data" << std::endl;
             int completed_task = completed_queue.data_queue.front();
             completed_queue.data_queue.pop();
             num_complete++;
@@ -233,7 +234,12 @@ void Scheduler::execute_graph(const TaskGraph &task_graph) {
                     ready_queue.push(dependent_id);
                 }
             }
+
+            std::cout << "Processed completed data" << std::endl;
         }
         queue_lock.unlock();
+        std::cout << "Unlocked, tasks completed: " << num_complete << " / " << graph_tasks.size() << std::endl;
     }
+
+    std::cout << "All tasks processed" << std::endl;
 }

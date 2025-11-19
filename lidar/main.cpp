@@ -4,12 +4,13 @@
 #include <iostream>
 #include <vector>
 
-float dot_product(const std::vector<float> &vec1, const std::vector<float> &vec2) {
-    float result = 0;
+int dot_product(const std::vector<int> &vec1, const std::vector<int> &vec2) {
+    int result = 0;
     for (int i = 0; i < vec1.size(); ++i) {
         result += vec1[i] * vec2[i];
     }
 
+    std::cout << "Dot product result: " << result << std::endl;
     return result;
 }
 
@@ -22,9 +23,9 @@ void vec_sum(const std::vector<float> &vec1, const std::vector<float> &vec2, std
 int main() {
     DataManager data_manager;
 
-    std::vector<float> vec1 = {1.0, 2.3, 5.5, 6.7, 8.1};
-    std::vector<float> vec2 = {2.0, 3.1, 5.6, -2.8, -54.2};
-    float dot_result = 0;
+    std::vector<int> vec1 = {1, 2, 3, 4, 5};
+    std::vector<int> vec2 = {-1, -2, -3, -4, -5};
+    int dot_result = 1;
 
     std::vector<DataUsage> data_usages = {DataUsage::ReadOnly, DataUsage::ReadOnly, DataUsage::ReadWrite};
 
@@ -41,6 +42,8 @@ int main() {
     Runtime helios_runtime(data_manager, 4);
     GPUDevice gpu_device(GPUBackend::Cuda);
     helios_runtime.commit_graph(task_graph, gpu_device);
+
+    std::cout << "Dot product result: " << dot_result << std::endl;
 
     return 0;
 }

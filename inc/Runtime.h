@@ -35,7 +35,7 @@ class Runtime {
     Runtime(DataManager &data_manager, size_t num_threads) : data_manager_(data_manager), num_threads(num_threads) {};
 
     // Immediately communicates with the scheduler to begin executing tasks
-    std::future<void> commit_graph(TaskGraph &task_graph, GPUDevice &device_info);
+    void commit_graph(TaskGraph &task_graph, GPUDevice &device_info);
 
   private:
     DataManager &data_manager_;

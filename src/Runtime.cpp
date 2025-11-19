@@ -34,7 +34,7 @@ void Runtime::create_executor_(GPUDevice &device_info, const TaskGraph &task_gra
 }
 
 // TODO: Figure out return type here - Maybe a future?
-std::future<void> Runtime::commit_graph(TaskGraph &task_graph, GPUDevice &device_info) {
+void Runtime::commit_graph(TaskGraph &task_graph, GPUDevice &device_info) {
     task_graph.validate_graph();
     create_executor_(device_info, task_graph);
     create_thread_pool_();
