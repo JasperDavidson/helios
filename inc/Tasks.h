@@ -24,11 +24,9 @@ class ITask {
     std::string task_name;
     std::vector<int> input_ids;
     int output_id;
-    std::vector<DataUsage> data_usages;
 
-    ITask(const std::string &task_name, const std::vector<int> &input_ids, int output_id,
-          const std::vector<DataUsage> &data_usages)
-        : task_name(task_name), input_ids(input_ids), output_id(output_id), data_usages(data_usages) {};
+    ITask(const std::string &task_name, const std::vector<int> &input_ids, int output_id)
+        : task_name(task_name), input_ids(input_ids), output_id(output_id) {};
     ITask() = default;
 
     virtual void accept(Scheduler &scheduler) = 0;
@@ -36,9 +34,8 @@ class ITask {
 
 class BaseCPUTask : public ITask {
   public:
-    BaseCPUTask(const std::string &task_name, const std::vector<int> &input_ids, int output_id,
-                const std::vector<DataUsage> &data_usages)
-        : ITask(task_name, input_ids, output_id, data_usages) {};
+    BaseCPUTask(const std::string &task_name, const std::vector<int> &input_ids, int output_id)
+        : ITask(task_name, input_ids, output_id) {};
 
     std::function<void()> task_lambda;
     void accept(Scheduler &scheduler) override;
@@ -47,8 +44,8 @@ class BaseCPUTask : public ITask {
 template <typename F, class... Types> class TypedCPUTask : public BaseCPUTask {
   public:
     TypedCPUTask(std::string task_name, const std::vector<int> &input_ids, int output_id, DataManager &data_manager,
-                 const std::vector<DataUsage> &data_usages, F &&task, Types &&...args)
-        : BaseCPUTask(task_name, input_ids, output_id, data_usages) {
+                 F &&task, Types &&...args)
+        : BaseCPUTask(task_name, input_ids, output_id) {
         task_lambda = [&data_manager, output_id, task = std::forward<F>(task),
                        args_tuple = std::make_tuple(std::forward<Types>(args)...)]() mutable {
             // Bundle the input data
@@ -69,8 +66,8 @@ template <typename F, class... Types> class TypedCPUTask : public BaseCPUTask {
 };
 
 template <typename F, class... Types>
-TypedCPUTask(std::string, const std::vector<int> &, int, DataManager &, const std::vector<DataUsage> &, F &&,
-             Types &&...) -> TypedCPUTask<std::decay_t<F>, Types...>;
+TypedCPUTask(std::string, const std::vector<int> &, int, DataManager &, F &&, Types &&...)
+    -> TypedCPUTask<std::decay_t<F>, Types...>;
 
 class GPUTask : public ITask {
     // TODO: How should we actually capture the data from the GPU?
@@ -79,11 +76,10 @@ class GPUTask : public ITask {
     //  KEY CHANGE: User must specify output size of kernel if the output size will differ from size of input objects,
     //  or opt into buffer counting
   public:
-    GPUTask(const std::string &task_name, const std::vector<int> &input_ids, const std::vector<DataUsage> &data_usages,
-            int output_id, bool count_buffer_active, const std::vector<int> &kernel_size,
-            const std::vector<int> &threads_per_group)
-        : ITask(task_name, input_ids, output_id, data_usages), count_buffer_active(count_buffer_active),
-          kernel_size(kernel_size), threads_per_group(threads_per_group) {};
+    GPUTask(const std::string &task_name, const std::vector<int> &input_ids, int output_id, bool count_buffer_active,
+            const std::vector<int> &kernel_size, const std::vector<int> &threads_per_group)
+        : ITask(task_name, input_ids, output_id), count_buffer_active(count_buffer_active), kernel_size(kernel_size),
+          threads_per_group(threads_per_group) {};
 
     std::vector<int> kernel_size;
     std::vector<int> threads_per_group;
@@ -122,14 +118,9 @@ class GPUTask : public ITask {
  */
 class TaskGraph {
   public:
-    TaskGraph(const std::vector<int> &initial_input_ids) {
-        for (int init_input_id : initial_input_ids) {
-            data_producer_map_[init_input_id] = ROOT_NODE_ID;
-            dependents_[ROOT_NODE_ID].push_back(init_input_id);
-        }
-    };
+    TaskGraph() {};
 
-    void add_task(std::shared_ptr<ITask> task);
+    void add_task(std::shared_ptr<ITask> task, bool add_task);
     std::vector<int> find_ready() const;
     void validate_graph();
 

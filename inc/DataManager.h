@@ -201,7 +201,15 @@ class DataManager {
 
     template <typename T> void store_data(int data_id, const T &new_data) {
         auto raw_data = get_span_mut(data_id);
-        memcpy(raw_data.data(), &new_data, raw_data.size());
+        T *dest_object = reinterpret_cast<T *>(raw_data.data());
+        *dest_object = new_data;
+    };
+
+    template <typename T> void store_data(int data_id, T &&new_data) {
+        using U = std::decay_t<T>;
+        auto raw_data = get_span_mut(data_id);
+        U *dest_object = reinterpret_cast<U *>(raw_data.data());
+        *dest_object = std::forward<T>(new_data);
     };
 
     std::span<const std::byte> get_span(int data_id) const { return data_map.at(data_id).const_data_accessor(); };

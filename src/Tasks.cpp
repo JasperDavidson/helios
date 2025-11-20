@@ -11,7 +11,7 @@ void BaseCPUTask::accept(Scheduler &scheduler) { scheduler.visit(*this); }
 
 void GPUTask::accept(Scheduler &scheduler) { scheduler.visit(*this); }
 
-void TaskGraph::add_task(std::shared_ptr<ITask> task) {
+void TaskGraph::add_task(std::shared_ptr<ITask> task, bool root_task) {
     task->id = task_id_inc++;
     all_tasks_[task->id] = task;
 
@@ -25,6 +25,11 @@ void TaskGraph::add_task(std::shared_ptr<ITask> task) {
     data_producer_map_[task->output_id] = task->id;
 
     for (int input_id : task->input_ids) {
+        if (root_task) {
+            data_producer_map_[input_id] = ROOT_NODE_ID;
+            dependents_[ROOT_NODE_ID].push_back(input_id);
+        }
+
         if (data_producer_map_.find(input_id) == data_producer_map_.end()) {
             unfulfilled_data_[input_id].push_back(task->id);
             continue;
