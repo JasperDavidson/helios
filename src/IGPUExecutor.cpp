@@ -26,6 +26,8 @@ IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator(size_t devloc_min_size, siz
     hostvis_free_map[0] = true;
 };
 
+IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator() : GPUMemoryAllocator(0, 0, 0, 0, 0, 0) {};
+
 void IGPUExecutor::GPUMemoryAllocator::init_mem_types(uint64_t &free_mask,
                                                       std::vector<std::vector<size_t>> &size_address,
                                                       std::unordered_map<size_t, size_t>, MemoryHint mem_hint) {

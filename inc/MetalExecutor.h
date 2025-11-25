@@ -1,9 +1,9 @@
 #ifndef METAL_H
 #define METAL_H
 
+#include "DataManager.h"
 #include "IGPUExecutor.h"
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <unordered_map>
 
@@ -14,7 +14,7 @@ class MetalExecutor : public IGPUExecutor {
                   std::pair<int, int> unified_bounds, size_t proxy_size = 0);
     ~MetalExecutor();
 
-    GPUBufferHandle allocate_buffer(std::size_t buffer_size, const MemoryHint &mem_hint) override;
+    GPUBufferHandle allocate_buffer(std::size_t buffer_size, const MemoryHint mem_hint) override;
     GPUState deallocate_buffer(const GPUBufferHandle &buffer_handle) override;
 
     GPUState copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle) override;
@@ -26,8 +26,6 @@ class MetalExecutor : public IGPUExecutor {
 
     GPUState synchronize() override;
 
-    int get_buffer_length(const GPUBufferHandle &buffer_handle) override;
-
   private:
     int buffer_counter = 0;
 
@@ -35,7 +33,7 @@ class MetalExecutor : public IGPUExecutor {
     std::unique_ptr<MetalExecutorImpl> p_metal_impl;
 
     // Reusable proxy buffer private resources
-    size_t proxy_size_;
+    GPUBufferHandle proxy_handle_;
 
     void load_default_library();
 
@@ -50,7 +48,7 @@ class MetalExecutor : public IGPUExecutor {
     GPUMemoryAllocator mem_allocator;
 
     // Provides access to proxy buffer and extends size if needed
-    GPUBufferHandle access_proxy(size_t data_size);
+    void access_proxy(size_t data_size);
 };
 
 #endif

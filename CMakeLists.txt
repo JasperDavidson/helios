@@ -4,7 +4,7 @@ project(helios LANGUAGES CXX OBJCXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(Helios_Core STATIC src/DataManager.cpp src/Tasks.cpp)
+add_library(Helios_Core STATIC src/DataManager.cpp src/Tasks.cpp src/IGPUExecutor.cpp)
 target_include_directories(Helios_Core PUBLIC inc)
 
 add_library(Helios_ThreadPool STATIC src/ThreadPool/ThreadPool.cpp)

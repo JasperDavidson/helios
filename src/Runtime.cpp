@@ -15,17 +15,14 @@ void Runtime::create_executor_(GPUDevice &device_info, const TaskGraph &task_gra
         // Finds plausible default size for proxy buffer
         std::vector<DataEntry> device_local_tasks = data_manager_.get_device_local_tasks();
 
-        if (device_local_tasks.empty()) {
-            gpu_exec_ = std::make_unique<MetalExecutor>(0);
-        }
-
         size_t max_local_task_size = 0;
         for (DataEntry &local_task : device_local_tasks) {
             size_t local_task_size = local_task.byte_size;
             max_local_task_size = std::max(max_local_task_size, local_task_size);
         }
 
-        gpu_exec_ = std::make_unique<MetalExecutor>(max_local_task_size);
+        gpu_exec_ = std::make_unique<MetalExecutor>(device_info.devloc_range, device_info.hostvis_range,
+                                                    device_info.unified_range, max_local_task_size);
     } else if (device_info.backend == GPUBackend::Cuda) {
         // TODO: Impl once cuda is implemented
     } else {

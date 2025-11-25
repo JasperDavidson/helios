@@ -78,7 +78,7 @@ void Scheduler::visit(const GPUTask &gpu_task) {
         }
 
         buffer_handles.push_back(buffer_in_use);
-        gpu_executor->copy_to_device(input_data, buffer_in_use, input_data_size, true);
+        gpu_executor->copy_to_device(input_data, buffer_in_use);
         gpu_executor->map_data_to_buffer(data_id, buffer_in_use);
     }
 
@@ -123,17 +123,17 @@ void Scheduler::visit(const GPUTask &gpu_task) {
             // Find the number of bytes used for GPU output
             std::vector<std::byte> byte_vec(COUNTER_BUFFER_SIZE);
             std::span<std::byte> counted_span(byte_vec);
-            gpu_executor->copy_from_device(counted_span, count_buffer, COUNTER_BUFFER_SIZE, true);
+            gpu_executor->copy_from_device(counted_span, count_buffer);
             size_t counted_bytes = count_bytes_to_size(counted_span);
 
             // Allocate memory/span on CPU for GPU output
             // This is the earliest we could possibly form the span since only now we know the size
             std::byte byte_array[counted_bytes];
             std::span<std::byte> output_span(byte_array, counted_bytes);
-            this->gpu_executor->copy_from_device(output_span, count_buffer, counted_bytes, false);
+            this->gpu_executor->copy_from_device(output_span, count_buffer);
         } else {
             std::span<std::byte> output_span = data_manager.get_span_mut(gpu_task.output_id);
-            this->gpu_executor->copy_from_device(output_span, output_buffer, output_size, false);
+            this->gpu_executor->copy_from_device(output_span, output_buffer);
         }
 
         completed_queue.push_task(gpu_task.id);

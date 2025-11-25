@@ -22,7 +22,15 @@ struct GPUDevice {
     // implicit GPU to use (e.g. Metal), otherwise an ID should be provided (e.g. CUDA)
     int device_id;
 
-    GPUDevice(GPUBackend backend, int device_id = -1) : backend(backend), device_id(device_id) {};
+    // Memory sizes
+    std::pair<int, int> devloc_range;
+    std::pair<int, int> unified_range;
+    std::pair<int, int> hostvis_range;
+
+    GPUDevice(GPUBackend backend, std::pair<int, int> devloc_range, std::pair<int, int> unified_range,
+              std::pair<int, int> hostvis_range, int device_id = -1)
+        : backend(backend), device_id(device_id), devloc_range(devloc_range), unified_range(unified_range),
+          hostvis_range(hostvis_range) {};
 };
 
 /*

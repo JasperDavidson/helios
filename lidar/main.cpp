@@ -65,7 +65,7 @@ void benchmark(DataManager &data_manager, int num_tasks, auto hash_lambda, F &&t
 
     for (int num_threads = 2; num_threads <= MACBOOK_PROCESS_THREADS; ++num_threads) {
         Runtime helios_runtime(data_manager, num_threads);
-        GPUDevice device(GPUBackend::Cuda);
+        GPUDevice device(GPUBackend::Cuda, std::pair(2, 256), std::pair(2, 256), std::pair(2, 256));
 
         TaskGraph task_graph;
 

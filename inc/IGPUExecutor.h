@@ -35,7 +35,7 @@ enum class DispatchType { Serial, Concurrent };
 class IGPUExecutor {
   public:
     // Allocating/freeing buffer memory on the GPU for kernel tasks
-    GPUBufferHandle virtual allocate_buffer(std::size_t buffer_size, const MemoryHint &mem_hint) = 0;
+    GPUBufferHandle virtual allocate_buffer(std::size_t buffer_size, const MemoryHint mem_hint) = 0;
     GPUState virtual deallocate_buffer(const GPUBufferHandle &buffer_handle) = 0;
 
     // Sending memory between devices for task completion/after task completion
@@ -48,9 +48,6 @@ class IGPUExecutor {
 
     // Prevents more GPU tasks from being added until all current ones are complete
     GPUState virtual synchronize() = 0;
-
-    // Allows for checking of buffer sizes without access to device specific buffer maps
-    virtual int get_buffer_length(const GPUBufferHandle &buffer_handle) = 0;
 
     // Note this will default construct to false if value is not present - intended behavior here
     bool get_kernel_status(const std::string &kernel_name) { return kernel_status_[kernel_name]; }
