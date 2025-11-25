@@ -1,4 +1,5 @@
 #include "MetalExecutor.h"
+#include "DataManager.h"
 #include "IGPUExecutor.h"
 #include "Metal/Metal.h"
 #include <Foundation/Foundation.h>
@@ -27,6 +28,11 @@ struct MetalExecutor::MetalExecutorImpl {
     id<MTLCommandQueue> command_queue_;
     id<MTLLibrary> mtl_library_;
 
+    // Slab buffers for buddy memory allocation
+    id<MTLBuffer> devloc_slab_buffer_;
+    id<MTLBuffer> hostvis_slab_buffer_;
+    id<MTLBuffer> unified_slab_buffer_;
+
     // map for storing already prepared compute pipelines
     std::unordered_map<std::string, id<MTLComputePipelineState>> pipeline_map_;
 
@@ -35,6 +41,22 @@ struct MetalExecutor::MetalExecutorImpl {
 
     // map for storing GPU buffer handles
     std::unordered_map<GPUBufferHandle, id<MTLBuffer>> buffer_map_;
+
+    id<MTLBuffer> select_buffer(MemoryHint mem_hint) {
+        switch (mem_hint) {
+        case MemoryHint::DeviceLocal:
+            return devloc_slab_buffer_;
+            break;
+        case MemoryHint::Unified:
+            return unified_slab_buffer_;
+            break;
+        case MemoryHint::HostVisible:
+            return hostvis_slab_buffer_;
+            break;
+        default:
+            throw std::runtime_error("Tried to fetch an invalid buffer!");
+        }
+    }
 
     id<MTLComputePipelineState> find_cache_pipeline(const std::string &kernel_name) {
         auto cache_iter = pipeline_map_.find(kernel_name);
@@ -82,7 +104,24 @@ void MetalExecutor::load_default_library() {
     p_metal_impl->mtl_library_ = library;
 }
 
-MetalExecutor::MetalExecutor(size_t proxy_size) : p_metal_impl(std::make_unique<MetalExecutorImpl>()) {
+MetalExecutor::MetalExecutor(std::pair<int, int> devloc_bounds, std::pair<int, int> hostvis_bounds,
+                             std::pair<int, int> unified_bounds, size_t proxy_size)
+    : p_metal_impl(std::make_unique<MetalExecutorImpl>()) {
+    // Construct the GPUMemoryAllocator
+    mem_allocator = GPUMemoryAllocator(devloc_bounds.first, devloc_bounds.second, unified_bounds.first,
+                                       unified_bounds.second, hostvis_bounds.first, hostvis_bounds.second);
+
+    p_metal_impl->devloc_slab_buffer_ =
+        [p_metal_impl->mtl_device_ newBufferWithLength:(devloc_bounds.second - devloc_bounds.first + 1)
+                                               options:MTLResourceStorageModePrivate];
+    p_metal_impl->hostvis_slab_buffer_ =
+        [p_metal_impl->mtl_device_ newBufferWithLength:(hostvis_bounds.second - hostvis_bounds.first + 1)
+                                               options:MTLResourceStorageModeManaged];
+
+    p_metal_impl->unified_slab_buffer_ =
+        [p_metal_impl->mtl_device_ newBufferWithLength:(unified_bounds.second - unified_bounds.first + 1)
+                                               options:MTLResourceStorageModeManaged];
+
     p_metal_impl->mtl_device_ = MTLCreateSystemDefaultDevice();
     if (!p_metal_impl->mtl_device_) {
         throw std::runtime_error("Failed to get Metal device.");
@@ -91,14 +130,15 @@ MetalExecutor::MetalExecutor(size_t proxy_size) : p_metal_impl(std::make_unique<
     load_default_library();
 
     p_metal_impl->pipeline_map_ = std::unordered_map<std::string, id<MTLComputePipelineState>>();
-    proxy_buffer_ = allocate_buffer(proxy_size, MemoryHint::DeviceLocal);
+    proxy_size_ = proxy_size;
 }
 
 MetalExecutor::~MetalExecutor() = default;
 
 GPUBufferHandle MetalExecutor::allocate_buffer(std::size_t buffer_size, const MemoryHint &mem_hint) {
     // Create the buffer handle object
-    GPUBufferHandle buffer_handle(buffer_counter, mem_hint);
+    size_t free_offset = mem_allocator.allocate_memory(buffer_size, mem_hint);
+    GPUBufferHandle buffer_handle(buffer_counter, mem_hint, free_offset, buffer_size);
     buffer_counter++;
 
     // Create the buffer and map to either private or managed storage load
@@ -122,6 +162,8 @@ GPUBufferHandle MetalExecutor::allocate_buffer(std::size_t buffer_size, const Me
 }
 
 GPUState MetalExecutor::deallocate_buffer(const GPUBufferHandle &buffer_handle) {
+    mem_allocator.check_free_mem(buffer_handle.mem_offset, buffer_handle.size, buffer_handle.mem_hint);
+
     // Remove the reference to the command buffer - Metal will automatically deallocate resources
     if (p_metal_impl->buffer_map_.contains(buffer_handle)) {
         p_metal_impl->buffer_map_.erase(buffer_handle);
@@ -132,17 +174,12 @@ GPUState MetalExecutor::deallocate_buffer(const GPUBufferHandle &buffer_handle) 
     return GPUState::GhostBuffer;
 }
 
-// NOTE: Should implement some way to ensure proxy buffer doesn't take up some amount of space based on historical
-// buffer allocation of the program (probably a problem for when profiling is implemented)
 GPUBufferHandle MetalExecutor::access_proxy(size_t data_size) {
-    NSUInteger buffer_size = [p_metal_impl->buffer_map_.at(proxy_buffer_) length];
-
-    if (data_size > buffer_size) {
-        buffer_size *= 2;
-        proxy_buffer_ = allocate_buffer(buffer_size, proxy_buffer_.mem_hint);
+    if (data_size > proxy_size_) {
+        mem_allocator.check_free_mem(proxy_size_, 0, MemoryHint::HostVisible);
+        proxy_size_ *= 2;
+        mem_allocator.allocate_memory(proxy_size_, MemoryHint::HostVisible);
     }
-
-    return proxy_buffer_;
 }
 
 // TODO: How can we make command buffers more optimized for batch usages? Creating + committing each time -> perf
@@ -172,30 +209,35 @@ GPUState MetalExecutor::blit_to_private(std::span<const std::byte> data_mem, con
 }
 
 // For managed resources: Manually synchronized, CPU/GPU have unique copies
-GPUState MetalExecutor::copy_to_managed(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                        std::size_t data_size) {
-    id<MTLBuffer> buffer = p_metal_impl->buffer_map_.find(buffer_handle)->second;
-    void *buffer_mem = [buffer contents];
-    memcpy(buffer_mem, data_mem.data(), data_size);
+GPUState MetalExecutor::copy_to_managed(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle) {
+    //    id<MTLBuffer> buffer = p_metal_impl->buffer_map_.find(buffer_handle)->second;
+    //    void *buffer_mem = [buffer contents];
+
+    void *slab_mem = [p_metal_impl->devloc_slab_buffer_ contents];
+    void *buffer_mem = (char *)slab_mem + buffer_handle.mem_offset;
+    memcpy(buffer_mem, data_mem.data(), buffer_handle.size);
 
     // Notify the GPU new memory has arrived
-    [buffer didModifyRange:NSMakeRange(0, data_size)];
+    [p_metal_impl->devloc_slab_buffer_
+        didModifyRange:NSMakeRange(*(char *)buffer_mem, *(char *)buffer_mem + buffer_handle.size)];
 
     return GPUState::GPUSuccess;
 }
 
-GPUState MetalExecutor::copy_to_shared(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                       std::size_t data_size) {
-    id<MTLBuffer> buffer = p_metal_impl->buffer_map_.find(buffer_handle)->second;
-    void *buffer_mem = [buffer contents];
-    memcpy(buffer_mem, data_mem.data(), data_size);
+GPUState MetalExecutor::copy_to_shared(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle) {
+    //    id<MTLBuffer> buffer = p_metal_impl->buffer_map_.find(buffer_handle)->second;
+    //    void *buffer_mem = [buffer contents];
+
+    void *slab_mem = [p_metal_impl->unified_slab_buffer_ contents];
+    void *buffer_mem = (char *)slab_mem + buffer_handle.mem_offset;
+    memcpy(buffer_mem, data_mem.data(), buffer_handle.size);
 
     return GPUState::GPUSuccess;
 }
 
 // For private resources: Create a proxy buffer that can contain private data and transfer to CPU
 GPUState MetalExecutor::private_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                       std::size_t data_size, bool sync) {
+                                       std::size_t data_size) {
     id<MTLBuffer> buffer = p_metal_impl->buffer_map_.find(buffer_handle)->second;
     // Use a proxy buffer to transfer data
     GPUBufferHandle proxy_buffer_handle = access_proxy(data_size);
@@ -222,89 +264,79 @@ GPUState MetalExecutor::private_to_cpu(std::span<std::byte> data_mem, const GPUB
 }
 
 // For managed resources: CPU/GPU have unique copies - block to ensure data transfer is complete
-GPUState MetalExecutor::managed_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                       std::size_t data_size, bool sync) {
-    id<MTLBuffer> buffer = p_metal_impl->buffer_map_.find(buffer_handle)->second;
+GPUState MetalExecutor::managed_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle) {
+    id<MTLBuffer> buffer = p_metal_impl->hostvis_slab_buffer_;
+
     id<MTLCommandBuffer> synchronize_cmd_buffer = [p_metal_impl->command_queue_ commandBuffer];
     id<MTLBlitCommandEncoder> blit_encoder = [synchronize_cmd_buffer blitCommandEncoder];
 
     [blit_encoder synchronizeResource:buffer];
     [blit_encoder endEncoding];
-    [synchronize_cmd_buffer commit];
-
-    // Allows for memory copying after gpu is finished - doesn't block CPU unless asked for
     [synchronize_cmd_buffer addCompletedHandler:^(id<MTLCommandBuffer> synchronize_buffer) {
-      void *buffer_mem = [buffer contents];
-      memcpy(data_mem.data(), buffer_mem, data_size);
+      void *slab_mem = [buffer contents];
+      void *buffer_mem = (char *)slab_mem + buffer_handle.mem_offset;
+      memcpy(data_mem.data(), buffer_mem, buffer_handle.size);
     }];
 
-    if (sync) {
-        [synchronize_cmd_buffer waitUntilCompleted];
-    }
+    [synchronize_cmd_buffer commit];
 
     return GPUState::GPUSuccess;
 }
 
-GPUState MetalExecutor::shared_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                      std::size_t data_size) {
-    id<MTLBuffer> buffer = p_metal_impl->buffer_map_.find(buffer_handle)->second;
-    void *buffer_mem = [buffer contents];
-    memcpy(data_mem.data(), buffer_mem, data_size);
+GPUState MetalExecutor::shared_to_cpu(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle) {
+    //    id<MTLBuffer> buffer = p_metal_impl->buffer_map_.find(buffer_handle)->second;
+    //    void *buffer_mem = [buffer contents];
+
+    void *slab_mem = [p_metal_impl->unified_slab_buffer_ contents];
+    void *buffer_mem = (char *)slab_mem + buffer_handle.mem_offset;
+    memcpy(data_mem.data(), buffer_mem, buffer_handle.size);
 
     return GPUState::GPUSuccess;
 }
 
 // TODO: Perhaps we want to have some sort of MemoryAllocator that can determine when it's best to use multiple buffers
 // vs. one large one?
-GPUState MetalExecutor::copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                       std::size_t data_size, bool sync) {
-    auto buffer_it = p_metal_impl->buffer_map_.find(buffer_handle);
-    if (buffer_it == p_metal_impl->buffer_map_.end()) {
-        return GPUState::GhostBuffer;
-    }
+GPUState MetalExecutor::copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle) {
+    //    auto buffer_it = p_metal_impl->buffer_map_.find(buffer_handle);
+    //    if (buffer_it == p_metal_impl->buffer_map_.end()) {
+    //        return GPUState::GhostBuffer;
+    //    }
+    //
+    //    id<MTLBuffer> buffer = buffer_it->second;
+    //
+    //    // Ensure requested buffer has enough space
+    //    if (buffer_handle.size < data_size) {
+    //        return GPUState::GPUFailure;
+    //    }
 
-    id<MTLBuffer> buffer = buffer_it->second;
-
-    // Ensure requested buffer has enough space
-    if ([buffer length] < data_size) {
-        return GPUState::GPUFailure;
-    }
-
-    // TODO: Implement shared memory
     switch (buffer_handle.mem_hint) {
     case MemoryHint::DeviceLocal:
-        return blit_to_private(data_mem, buffer_handle, data_size, sync);
+        return blit_to_private(data_mem, buffer_handle);
     case MemoryHint::HostVisible:
-        if (([buffer resourceOptions] & MTLResourceStorageModeManaged) == MTLResourceStorageModeManaged) {
-            return copy_to_managed(data_mem, buffer_handle, data_size);
-        } else if (([buffer resourceOptions] & MTLResourceStorageModeShared) == MTLResourceStorageModeShared) {
-            return copy_to_shared(data_mem, buffer_handle, data_size);
-        }
+        return copy_to_managed(data_mem, buffer_handle);
+    case MemoryHint::Unified:
+        return copy_to_shared(data_mem, buffer_handle);
     }
 
     // Invalid buffer storage type - shouldn't trigger
     return GPUState::GPUFailure;
 }
 
-GPUState MetalExecutor::copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                         std::size_t data_size, bool sync) {
-    auto buffer_it = p_metal_impl->buffer_map_.find(buffer_handle);
-    if (buffer_it == p_metal_impl->buffer_map_.end()) {
-        return GPUState::GhostBuffer;
-    }
+GPUState MetalExecutor::copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle) {
+    //    auto buffer_it = p_metal_impl->buffer_map_.find(buffer_handle);
+    //    if (buffer_it == p_metal_impl->buffer_map_.end()) {
+    //        return GPUState::GhostBuffer;
+    //    }
+    //
+    //    id<MTLBuffer> buffer = buffer_it->second;
 
-    id<MTLBuffer> buffer = buffer_it->second;
-
-    // TODO: Implement shared memory
     switch (buffer_handle.mem_hint) {
     case MemoryHint::DeviceLocal:
-        return private_to_cpu(data_mem, buffer_handle, data_size, sync);
+        return private_to_cpu(data_mem, buffer_handle);
     case MemoryHint::HostVisible:
-        if (([buffer resourceOptions] & MTLResourceStorageModeManaged) == MTLResourceStorageModeManaged) {
-            return managed_to_cpu(data_mem, buffer_handle, data_size, sync);
-        } else if (([buffer resourceOptions] & MTLResourceStorageModeShared) == MTLResourceStorageModeShared) {
-            return shared_to_cpu(data_mem, buffer_handle, data_size);
-        }
+        return managed_to_cpu(data_mem, buffer_handle);
+    case MemoryHint::Unified:
+        return shared_to_cpu(data_mem, buffer_handle);
     }
 
     // Invalid buffer storage type - shouldn't trigger

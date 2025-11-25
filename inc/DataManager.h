@@ -13,16 +13,18 @@
 
 // MemoryHint - How the data stored in the buffer will be treated throughout the lifetime of a task on a CPU/GPU level
 //  - Enables optimizations with private memory on the GPU, guarantee that only it has access to it
-enum class MemoryHint { DeviceLocal, HostVisible };
+enum class MemoryHint { DeviceLocal, Unified, HostVisible };
 
 class GPUBufferHandle {
   public:
     size_t id;
+    size_t size;
     MemoryHint mem_hint;
     size_t mem_offset;
 
     GPUBufferHandle() = default;
-    GPUBufferHandle(int id, MemoryHint mem_hint) : id(id), mem_hint(mem_hint) {};
+    GPUBufferHandle(int id, MemoryHint mem_hint, size_t mem_offset, size_t size)
+        : id(id), mem_hint(mem_hint), mem_offset(mem_offset), size(size) {};
     bool operator==(const GPUBufferHandle &other) const { return this->id == other.id; }
 };
 
@@ -34,32 +36,6 @@ template <> struct std::hash<GPUBufferHandle> {
     }
 };
 } // namespace std
-
-// Class to handle memory allocation efficiently through the buddy system
-class GPUMemoryAllocator {
-  public:
-    GPUMemoryAllocator(size_t devloc_min_size, size_t devloc_max_size, size_t hostvis_min_size, size_t hostvis_max_size,
-                       IGPUExecutor &device);
-
-    size_t allocate_memory(size_t mem_size, MemoryHint mem_hint);
-    void check_free_mem(size_t mem_size, size_t mem_offset, MemoryHint mem_hint);
-
-  private:
-    std::unordered_map<MemoryHint, GPUBufferHandle> slab_map;
-
-    size_t devloc_min_order;
-    size_t devloc_max_order;
-    size_t hostvis_min_order;
-    size_t hostvis_max_order;
-
-    uint64_t devloc_free_mask;
-    uint64_t hostvis_free_mask;
-
-    std::vector<std::vector<size_t>> devloc_size_address;
-    std::vector<std::vector<size_t>> hostvis_size_address;
-    std::unordered_map<size_t, size_t> devloc_free_map;
-    std::unordered_map<size_t, size_t> hostvis_free_map;
-};
 
 // Templated DataHandle allows for associating types needed for std::any casts
 template <typename T> class DataHandle {

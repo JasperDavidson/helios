@@ -3,6 +3,7 @@
 
 #include "DataManager.h"
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <span>
 #include <unordered_map>
@@ -38,10 +39,8 @@ class IGPUExecutor {
     GPUState virtual deallocate_buffer(const GPUBufferHandle &buffer_handle) = 0;
 
     // Sending memory between devices for task completion/after task completion
-    GPUState virtual copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                    std::size_t data_size, bool sync) = 0;
-    GPUState virtual copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle,
-                                      std::size_t data_size, bool sync) = 0;
+    GPUState virtual copy_to_device(std::span<const std::byte> data_mem, const GPUBufferHandle &buffer_handle) = 0;
+    GPUState virtual copy_from_device(std::span<std::byte> data_mem, const GPUBufferHandle &buffer_handle) = 0;
 
     GPUState virtual execute_batch(const std::vector<KernelDispatch> &kernels, const DispatchType &dispatch_type,
                                    std::function<void()> &cpu_callback) = 0;
@@ -63,6 +62,42 @@ class IGPUExecutor {
     virtual ~IGPUExecutor() = default;
 
   protected:
+    // Class to handle memory allocation efficiently through the buddy system
+    class GPUMemoryAllocator {
+      public:
+        GPUMemoryAllocator(size_t devloc_min_size, size_t devloc_max_size, size_t unified_min_size,
+                           size_t unified_max_size, size_t hostvis_min_size, size_t hostvis_max_size);
+        GPUMemoryAllocator();
+
+        size_t allocate_memory(size_t mem_size, MemoryHint mem_hint);
+        void check_free_mem(size_t mem_size, size_t mem_offset, MemoryHint mem_hint);
+
+      private:
+        std::unordered_map<MemoryHint, GPUBufferHandle> slab_map;
+
+        size_t devloc_min_order;
+        size_t devloc_max_order;
+        size_t hostvis_min_order;
+        size_t hostvis_max_order;
+        size_t unified_min_order;
+        size_t unified_max_order;
+
+        uint64_t devloc_free_mask;
+        uint64_t hostvis_free_mask;
+        uint64_t unified_free_mask;
+
+        std::vector<std::vector<size_t>> devloc_size_address;
+        std::vector<std::vector<size_t>> unified_size_address;
+        std::vector<std::vector<size_t>> hostvis_size_address;
+        std::unordered_map<size_t, size_t> devloc_free_map;
+        std::unordered_map<size_t, size_t> unified_free_map;
+        std::unordered_map<size_t, size_t> hostvis_free_map;
+
+        // helper function for selecting the current state variables based on memory type
+        void init_mem_types(uint64_t &free_mask, std::vector<std::vector<size_t>> &size_address,
+                            std::unordered_map<size_t, size_t>, MemoryHint mem_hint);
+    };
+
     // Allows for the scheduler to check the status of kernels it has dispatched (kernel name -> future promise)
     // Is this needed still?
     std::unordered_map<std::string, bool> kernel_status_;

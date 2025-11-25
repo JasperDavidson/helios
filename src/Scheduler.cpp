@@ -44,6 +44,7 @@ void Scheduler::visit(const GPUTask &gpu_task) {
 
     // Use multimap for better efficiency when searching for unused buffers
     for (const GPUBufferHandle &buffer_handle : buffers_not_in_use) {
+        // What am I thinking here? Buffer handles don't live in the data manager lol
         size_to_buffer.emplace(data_manager.get_data_length(buffer_handle.id), buffer_handle);
     }
 
