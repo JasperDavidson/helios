@@ -22,7 +22,7 @@ void Runtime::create_executor_(GPUDevice &device_info, const TaskGraph &task_gra
         }
 
         // testing proxy buffer allocation
-        max_local_task_size = 32;
+        max_local_task_size = 16;
         std::cout << "Attempting proxy size " << max_local_task_size << std::endl;
 
         gpu_exec_ = std::make_unique<MetalExecutor>(device_info.devloc_range, device_info.hostvis_range,

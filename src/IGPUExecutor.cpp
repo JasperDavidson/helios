@@ -7,16 +7,16 @@
 IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator(size_t devloc_min_size, size_t devloc_max_size,
                                                      size_t unified_min_size, size_t unified_max_size,
                                                      size_t hostvis_min_size, size_t hostvis_max_size) {
-    devloc_min_order = next_pow2(devloc_min_size);
-    devloc_max_order = next_pow2(devloc_max_size);
-    unified_min_order = next_pow2(unified_min_size);
-    unified_max_order = next_pow2(unified_max_size);
-    hostvis_min_order = next_pow2(hostvis_min_size);
-    hostvis_max_order = next_pow2(hostvis_max_size);
+    devloc_min_order = (int)log2(next_pow2(devloc_min_size));
+    devloc_max_order = (int)log2(next_pow2(devloc_max_size));
+    unified_min_order = (int)log2(next_pow2(unified_min_size));
+    unified_max_order = (int)log2(next_pow2(unified_max_size));
+    hostvis_min_order = (int)log2(next_pow2(hostvis_min_size));
+    hostvis_max_order = (int)log2(next_pow2(hostvis_max_size));
 
-    devloc_free_mask = 1 << devloc_max_order;
-    unified_free_mask = 1 << unified_max_order;
-    hostvis_free_mask = 1 << hostvis_max_order;
+    devloc_free_mask = (1 << devloc_max_order);
+    unified_free_mask = (1 << unified_max_order);
+    hostvis_free_mask = (1 << hostvis_max_order);
 
     // Maybe not 0 here? Figure out what the mem offset is
     devloc_free_map[0] = true;
@@ -26,22 +26,26 @@ IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator(size_t devloc_min_size, siz
 
 IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator() : GPUMemoryAllocator(0, 0, 0, 0, 0, 0) {};
 
-void IGPUExecutor::GPUMemoryAllocator::init_mem_types(uint64_t &free_mask,
-                                                      std::unordered_map<uint8_t, std::vector<size_t>> &size_address,
-                                                      std::unordered_map<size_t, size_t>, MemoryHint mem_hint) {
+void IGPUExecutor::GPUMemoryAllocator::init_mem_types(uint64_t *&free_mask,
+                                                      std::unordered_map<uint8_t, std::vector<size_t>> *&size_address,
+                                                      std::unordered_map<size_t, size_t> *&free_map,
+                                                      MemoryHint mem_hint) {
     // Fetch the relevant instance variables based on memory hint
     switch (mem_hint) {
     case MemoryHint::Unified:
-        free_mask = unified_free_mask;
-        size_address = unified_size_address;
+        free_mask = &unified_free_mask;
+        size_address = &unified_size_address;
+        free_map = &unified_free_map;
         break;
     case MemoryHint::HostVisible:
-        free_mask = hostvis_free_mask;
-        size_address = hostvis_size_address;
+        free_mask = &hostvis_free_mask;
+        size_address = &hostvis_size_address;
+        free_map = &hostvis_free_map;
         break;
     case MemoryHint::DeviceLocal:
-        free_mask = devloc_free_mask;
-        size_address = devloc_size_address;
+        free_mask = &devloc_free_mask;
+        size_address = &devloc_size_address;
+        free_map = &devloc_free_map;
         break;
     default:
         // Could possibly throw this on a per system level as well? (e.g. some systems won't have unified)
@@ -52,18 +56,20 @@ void IGPUExecutor::GPUMemoryAllocator::init_mem_types(uint64_t &free_mask,
 size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, MemoryHint mem_hint) {
     // Find the minimum order (power of 2 memory size block) where this can be stored
     std::cout << "Finding memory order..." << std::endl;
-    size_t order = next_pow2(mem_size);
+    size_t order = (int)log2(next_pow2(mem_size));
     std::cout << "Memory order is " << order << std::endl;
+    std::cout << "Min order is " << unified_min_order << std::endl;
+    std::cout << "Max order is " << unified_max_order << std::endl;
 
     // Fetch the relevant instance variables based on memory hint
-    uint64_t &free_mask = devloc_free_mask;
-    std::unordered_map<uint8_t, std::vector<size_t>> &size_address = devloc_size_address;
-    std::unordered_map<size_t, size_t> &free_map = devloc_free_map;
+    uint64_t *free_mask = nullptr;
+    std::unordered_map<uint8_t, std::vector<size_t>> *size_address = nullptr;
+    std::unordered_map<size_t, size_t> *free_map = nullptr;
     init_mem_types(free_mask, size_address, free_map, mem_hint);
     std::cout << "Mem types selected!" << std::endl;
 
-    uint64_t search_mask = free_mask & ~((1 << order) - 1);
-    std::cout << "Free mask: " << std::bitset<64>(free_mask) << std::endl;
+    uint64_t search_mask = (*free_mask) & ~((1 << order) - 1);
+    std::cout << "Free mask: " << std::bitset<64>(*free_mask) << std::endl;
     std::cout << "Search mask: " << std::bitset<64>(search_mask) << std::endl;
     if (search_mask == 0) {
         // Find some way to more effectively handle being out of memory
@@ -71,31 +77,43 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
         throw std::runtime_error("No space left on GPU!");
     }
 
-    int next_free_order = __builtin_ctz(search_mask) + 1;
-    size_t next_free_addr = size_address[next_free_order][-1];
+    int next_free_order = __builtin_ctz(search_mask);
+    std::cout << "Next free order is " << next_free_order << std::endl;
+    std::cout << "Order list length: " << (*size_address)[next_free_order].size() << std::endl;
+    size_t next_free_addr = (*size_address)[next_free_order].back();
 
     std::cout << "Next free address is " << next_free_addr << std::endl;
 
     // Return if free block already available
     if (next_free_order == order) {
-        size_address[next_free_order].pop_back();
+        (*size_address)[next_free_order].pop_back();
         return next_free_addr;
     }
 
     // Break down the buddy addresses to provide space
-    for (int cur_order = next_free_order; cur_order > order; cur_order--) {
-        size_address[next_free_order].pop_back();
+    for (int cur_order = next_free_order; order < cur_order; cur_order--) {
+        (*size_address)[cur_order].pop_back();
 
+        // Unmark the previous order as free if necessary
+        if ((*size_address)[cur_order].empty()) {
+            (*free_mask) &= (~(1 << cur_order));
+        }
+
+        // Add both blocks to their respective free lists
         size_t right_addr = next_free_addr + (1 << (cur_order - 1));
-        size_address[cur_order - 1].push_back(right_addr);
-        size_address[cur_order - 1].push_back(next_free_addr);
+        (*size_address)[cur_order - 1].push_back(right_addr);
+        (*size_address)[cur_order - 1].push_back(next_free_addr);
 
-        free_map[right_addr] = size_address[cur_order - 1].size() - 2;
-        free_map[next_free_addr] = size_address[cur_order - 1].size() - 1;
+        // Assign both blocks to be free in the free map
+        (*free_map)[right_addr] = size_address[cur_order - 1].size() - 2;
+        (*free_map)[next_free_addr] = size_address[cur_order - 1].size() - 1;
+
+        // Mark the current order as containing a free block
+        (*free_mask) |= (1 << (cur_order - 1));
     }
 
     // Free the newly created split at next_free_addr
-    size_address[order].pop_back();
+    (*size_address)[order].pop_back();
 
     return next_free_addr;
 }
@@ -104,9 +122,9 @@ void IGPUExecutor::GPUMemoryAllocator::check_free_mem(size_t mem_size, size_t of
     size_t order = next_pow2(mem_size);
 
     // Fetch the relevant instance variables based on memory hint
-    uint64_t &free_mask = devloc_free_mask;
-    std::unordered_map<uint8_t, std::vector<size_t>> &size_address = devloc_size_address;
-    std::unordered_map<size_t, size_t> free_map = devloc_free_map;
+    uint64_t *free_mask = nullptr;
+    std::unordered_map<uint8_t, std::vector<size_t>> *size_address = nullptr;
+    std::unordered_map<size_t, size_t> *free_map = nullptr;
     init_mem_types(free_mask, size_address, free_map, mem_hint);
 
     // Merge back up the buddy addresses, if possible
@@ -114,22 +132,22 @@ void IGPUExecutor::GPUMemoryAllocator::check_free_mem(size_t mem_size, size_t of
     size_t new_free_addr = offset;
     size_t buddy_address = new_free_addr ^ (1 << order);
     for (int cur_order = order; cur_order < order; ++cur_order) {
-        if (free_map.find(buddy_address) == free_map.end()) {
+        if ((*free_map).find(buddy_address) == (*free_map).end()) {
             break;
         }
 
         // Overwrite the buddy element with the last element in the order list for O(1) removal
-        int buddy_order_idx = free_map[buddy_address];
+        int buddy_order_idx = (*free_map)[buddy_address];
         size_address[cur_order][buddy_order_idx] = size_address[cur_order][-1];
-        size_address[cur_order].pop_back();
-        free_map[size_address[cur_order][buddy_order_idx]] = buddy_order_idx;
+        (*size_address)[cur_order].pop_back();
+        (*free_map)[(*size_address)[cur_order][buddy_order_idx]] = buddy_order_idx;
 
         // Add to order list above
         // We want to push back the address at the order above that encapsulates both blocks -> check if already
         // aligned, else align
         size_t new_free_addr =
-            new_free_addr % (2 ^ (cur_order + 1)) == 0 ? new_free_addr : (new_free_addr - (1 << cur_order));
-        size_address[cur_order + 1].push_back(new_free_addr);
+            new_free_addr % (2 << (cur_order + 1)) == 0 ? new_free_addr : (new_free_addr - (1 << cur_order));
+        (*size_address)[cur_order + 1].push_back(new_free_addr);
 
         buddy_address = new_free_addr ^ (1 << cur_order);
     }

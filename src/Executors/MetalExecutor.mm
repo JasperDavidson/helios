@@ -112,37 +112,27 @@ MetalExecutor::MetalExecutor(std::pair<int, int> devloc_bounds, std::pair<int, i
                                        unified_bounds.second, hostvis_bounds.first, hostvis_bounds.second);
 
     if (devloc_bounds != std::pair(0, 0)) {
-        size_t devloc_size = devloc_bounds.second - devloc_bounds.second;
+        size_t devloc_size = devloc_bounds.second - devloc_bounds.first;
         p_metal_impl->devloc_slab_buffer_ =
             [p_metal_impl->mtl_device_ newBufferWithLength:devloc_size options:MTLResourceStorageModePrivate];
-        void *slab_address = [p_metal_impl->devloc_slab_buffer_ contents];
 
-        mem_allocator.devloc_free_mask |= (1 << (int)log2(mem_allocator.devloc_max_order));
-        mem_allocator.devloc_size_address[mem_allocator.next_pow2(devloc_size)].push_back((uintptr_t)slab_address);
+        mem_allocator.devloc_size_address[mem_allocator.devloc_max_order].push_back(0);
     }
 
     if (hostvis_bounds != std::pair(0, 0)) {
-        size_t hostvis_size = hostvis_bounds.second - hostvis_bounds.second;
+        size_t hostvis_size = hostvis_bounds.second - hostvis_bounds.first;
         p_metal_impl->hostvis_slab_buffer_ =
             [p_metal_impl->mtl_device_ newBufferWithLength:hostvis_size options:MTLResourceStorageModeManaged];
-        void *slab_address = [p_metal_impl->hostvis_slab_buffer_ contents];
 
-        mem_allocator.hostvis_free_mask |= (1 << (int)log2(mem_allocator.hostvis_max_order));
-        mem_allocator.devloc_size_address[mem_allocator.next_pow2(hostvis_size)].push_back((uintptr_t)slab_address);
+        mem_allocator.hostvis_size_address[mem_allocator.hostvis_max_order].push_back(0);
     }
 
     if (unified_bounds != std::pair(0, 0)) {
-        size_t unified_size = unified_bounds.second - unified_bounds.second;
+        size_t unified_size = unified_bounds.second - unified_bounds.first;
         p_metal_impl->unified_slab_buffer_ =
             [p_metal_impl->mtl_device_ newBufferWithLength:unified_size options:MTLResourceStorageModeShared];
-        void *slab_address = [p_metal_impl->unified_slab_buffer_ contents];
 
-        std::cout << "Before shift: " << mem_allocator.unified_free_mask << std::endl;
-        mem_allocator.unified_free_mask |= (1 << (int)log2(mem_allocator.unified_max_order));
-        std::cout << "After shift: " << mem_allocator.unified_free_mask << std::endl;
-
-        mem_allocator.devloc_size_address[(int)log2(mem_allocator.unified_max_order)].push_back(
-            (uintptr_t)slab_address);
+        mem_allocator.unified_size_address[mem_allocator.unified_max_order].push_back(0);
     }
 
     p_metal_impl->mtl_device_ = MTLCreateSystemDefaultDevice();
@@ -156,6 +146,10 @@ MetalExecutor::MetalExecutor(std::pair<int, int> devloc_bounds, std::pair<int, i
 
     if (proxy_size > 0) {
         proxy_handle_ = allocate_buffer(proxy_size, MemoryHint::Unified);
+        GPUBufferHandle buffer_test = allocate_buffer(32, MemoryHint::Unified);
+        mem_allocator.check_free_mem(32, buffer_test.mem_offset, buffer_test.mem_hint);
+        mem_allocator.check_free_mem(proxy_size, proxy_handle_.mem_offset, proxy_handle_.mem_hint);
+        GPUBufferHandle buffer_test2 = allocate_buffer(32, MemoryHint::Unified);
     }
 }
 
