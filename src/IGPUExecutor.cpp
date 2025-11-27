@@ -4,8 +4,6 @@
 #include <stdexcept>
 #include <unordered_map>
 
-uint64_t next_pow2(uint64_t x) { return x <= 1 ? 1 : 1 << (64 - __builtin_clz(x - 1)); }
-
 IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator(size_t devloc_min_size, size_t devloc_max_size,
                                                      size_t unified_min_size, size_t unified_max_size,
                                                      size_t hostvis_min_size, size_t hostvis_max_size) {
@@ -29,7 +27,7 @@ IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator(size_t devloc_min_size, siz
 IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator() : GPUMemoryAllocator(0, 0, 0, 0, 0, 0) {};
 
 void IGPUExecutor::GPUMemoryAllocator::init_mem_types(uint64_t &free_mask,
-                                                      std::vector<std::vector<size_t>> &size_address,
+                                                      std::unordered_map<uint8_t, std::vector<size_t>> &size_address,
                                                       std::unordered_map<size_t, size_t>, MemoryHint mem_hint) {
     // Fetch the relevant instance variables based on memory hint
     switch (mem_hint) {
@@ -53,15 +51,20 @@ void IGPUExecutor::GPUMemoryAllocator::init_mem_types(uint64_t &free_mask,
 
 size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, MemoryHint mem_hint) {
     // Find the minimum order (power of 2 memory size block) where this can be stored
+    std::cout << "Finding memory order..." << std::endl;
     size_t order = next_pow2(mem_size);
+    std::cout << "Memory order is " << order << std::endl;
 
     // Fetch the relevant instance variables based on memory hint
     uint64_t &free_mask = devloc_free_mask;
-    std::vector<std::vector<size_t>> &size_address = devloc_size_address;
-    std::unordered_map<size_t, size_t> free_map = devloc_free_map;
+    std::unordered_map<uint8_t, std::vector<size_t>> &size_address = devloc_size_address;
+    std::unordered_map<size_t, size_t> &free_map = devloc_free_map;
     init_mem_types(free_mask, size_address, free_map, mem_hint);
+    std::cout << "Mem types selected!" << std::endl;
 
     uint64_t search_mask = free_mask & ~((1 << order) - 1);
+    std::cout << "Free mask: " << std::bitset<64>(free_mask) << std::endl;
+    std::cout << "Search mask: " << std::bitset<64>(search_mask) << std::endl;
     if (search_mask == 0) {
         // Find some way to more effectively handle being out of memory
         // Some sort of futures system or multithreading?
@@ -70,6 +73,8 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
 
     int next_free_order = __builtin_ctz(search_mask) + 1;
     size_t next_free_addr = size_address[next_free_order][-1];
+
+    std::cout << "Next free address is " << next_free_addr << std::endl;
 
     // Return if free block already available
     if (next_free_order == order) {
@@ -100,7 +105,7 @@ void IGPUExecutor::GPUMemoryAllocator::check_free_mem(size_t mem_size, size_t of
 
     // Fetch the relevant instance variables based on memory hint
     uint64_t &free_mask = devloc_free_mask;
-    std::vector<std::vector<size_t>> &size_address = devloc_size_address;
+    std::unordered_map<uint8_t, std::vector<size_t>> &size_address = devloc_size_address;
     std::unordered_map<size_t, size_t> free_map = devloc_free_map;
     init_mem_types(free_mask, size_address, free_map, mem_hint);
 

@@ -48,7 +48,11 @@ enum class DataUsage { ReadWrite, ReadOnly };
 struct DataEntry {
     std::any data;
     bool alias = false;
+
+    // size of the data_entry as a whole
     size_t byte_size;
+    // size of the type (e.g. int if std::vector<int>)
+    size_t type_size;
 
     // GPU Memory access hint
     MemoryHint mem_hint;
@@ -64,6 +68,8 @@ struct DataEntry {
 // DataManager object allows for caching of DataHandles to their actual objects
 class DataManager {
   public:
+    size_t get_type_size(int data_id) { return data_map.at(data_id).type_size; }
+
     template <typename T> T &get_data(DataHandle<T> data_handle) {
         auto &any_data = data_map.at(data_handle.id).data;
 
@@ -96,6 +102,7 @@ class DataManager {
         if constexpr (ContiguousContainer<T>) {
             size_t byte_size = raw_ptr->size() * sizeof(typename T::value_type);
             entry.byte_size = byte_size;
+            entry.type_size = sizeof(typename T::value_type);
 
             entry.const_data_accessor = [raw_ptr, byte_size]() {
                 return std::span<const std::byte>(reinterpret_cast<const std::byte *>(raw_ptr->data()), byte_size);
@@ -109,6 +116,7 @@ class DataManager {
         } else {
             size_t byte_size = sizeof(T);
             entry.byte_size = byte_size;
+            entry.type_size = sizeof(T);
 
             entry.const_data_accessor = [raw_ptr, byte_size]() {
                 return std::span<const std::byte>(reinterpret_cast<const std::byte *>(raw_ptr), byte_size);
@@ -133,7 +141,7 @@ class DataManager {
 
     template <typename T>
     DataHandle<T> create_ref_handle(T *data, const DataUsage &data_usage = DataUsage::ReadWrite,
-                                    const MemoryHint &mem_hint = MemoryHint::DeviceLocal) {
+                                    const MemoryHint &mem_hint = MemoryHint::HostVisible) {
         DataEntry entry;
         DataHandle<T> data_handle;
 
@@ -147,6 +155,8 @@ class DataManager {
         if constexpr (ContiguousContainer<T>) {
             size_t byte_size = data->size() * sizeof(typename T::value_type);
             entry.byte_size = byte_size;
+            entry.type_size = sizeof(typename T::value_type);
+
             entry.const_data_accessor = [data, byte_size]() {
                 return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data->data()), byte_size);
             };
@@ -159,6 +169,8 @@ class DataManager {
         } else {
             size_t byte_size = sizeof(T);
             entry.byte_size = byte_size;
+            entry.type_size = sizeof(T);
+
             entry.const_data_accessor = [data, byte_size]() {
                 return std::span<const std::byte>(reinterpret_cast<const std::byte *>(data), byte_size);
             };
@@ -204,11 +216,16 @@ class DataManager {
         return data_handle;
     }
 
+    void store_data(int data_id, std::span<std::byte> new_bytes) {
+        auto dest_span = get_span_mut(data_id);
+        std::copy(new_bytes.begin(), new_bytes.end(), dest_span.begin());
+    };
+
     template <typename T> void store_data(int data_id, const T &new_data) {
         auto raw_data = get_span_mut(data_id);
         T *dest_object = reinterpret_cast<T *>(raw_data.data());
         *dest_object = new_data;
-    };
+    }
 
     template <typename T> void store_data(int data_id, T &&new_data) {
         using U = std::decay_t<T>;

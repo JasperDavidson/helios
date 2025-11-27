@@ -37,22 +37,12 @@ void Scheduler::visit(const BaseCPUTask &cpu_task) {
 };
 
 void Scheduler::visit(const GPUTask &gpu_task) {
-    // Figure out if appropriate buffer space already exists on the GPU; if not create it
-    // - This allows for reusing buffers from previous kernels, saving resources
-    std::vector<GPUBufferHandle> buffers_not_in_use; // TODO:  = someAlgorithmToDetermineBuffersNotInUse
-    std::multimap<int, GPUBufferHandle> size_to_buffer;
-
-    // Use multimap for better efficiency when searching for unused buffers
-    for (const GPUBufferHandle &buffer_handle : buffers_not_in_use) {
-        // What am I thinking here? Buffer handles don't live in the data manager lol
-        size_to_buffer.emplace(data_manager.get_data_length(buffer_handle.id), buffer_handle);
-    }
-
     size_t max_input_size = 0;
     std::vector<GPUBufferHandle> buffer_handles;
     for (int i = 0; i < gpu_task.input_ids.size(); ++i) {
         int data_id = gpu_task.input_ids[i];
         if (gpu_executor->data_buffer_exists(data_id)) {
+            buffer_handles.push_back(gpu_executor->buffer_from_data(data_id));
             continue;
         }
 
@@ -60,23 +50,10 @@ void Scheduler::visit(const GPUTask &gpu_task) {
         MemoryHint data_mem_hint = data_manager.get_mem_hint(data_id);
         auto input_data = data_manager.get_span(data_id);
 
-        // Maintain max input size if user doesn't specify other method for output size tracking
+        // Maintain max input size in case user doesn't specify other method for output size tracking
         max_input_size = std::max(max_input_size, input_data_size);
 
-        auto potential_buffer = size_to_buffer.lower_bound(input_data_size);
-
-        // TODO: Look into decoupling so the scheduler can overlay I/O and compute
-        // Current serialization model is inefficient
-
-        GPUBufferHandle buffer_in_use;
-        if (potential_buffer != size_to_buffer.end()) {
-            buffer_in_use = potential_buffer->second;
-            buffer_in_use.mem_hint = data_mem_hint;
-            size_to_buffer.erase(potential_buffer);
-        } else {
-            buffer_in_use = gpu_executor->allocate_buffer(input_data_size, data_mem_hint);
-        }
-
+        GPUBufferHandle buffer_in_use = gpu_executor->allocate_buffer(input_data_size, data_mem_hint);
         buffer_handles.push_back(buffer_in_use);
         gpu_executor->copy_to_device(input_data, buffer_in_use);
         gpu_executor->map_data_to_buffer(data_id, buffer_in_use);
@@ -91,23 +68,19 @@ void Scheduler::visit(const GPUTask &gpu_task) {
     size_t output_size = user_output_size == 0 ? max_input_size : user_output_size;
     MemoryHint output_mem_hint = data_manager.get_mem_hint(gpu_task.output_id);
 
-    auto potential_output_buffer = size_to_buffer.lower_bound(output_size);
-    if (potential_output_buffer != size_to_buffer.end()) {
-        potential_output_buffer->second.mem_hint = output_mem_hint;
-        buffer_handles.push_back(potential_output_buffer->second);
-        size_to_buffer.erase(potential_output_buffer);
+    GPUBufferHandle output_buffer;
+    if (gpu_executor->data_buffer_exists(gpu_task.output_id)) {
+        output_buffer = gpu_executor->buffer_from_data(gpu_task.output_id);
+        buffer_handles.push_back(output_buffer);
     } else {
-        GPUBufferHandle new_buffer = gpu_executor->allocate_buffer(max_input_size, output_mem_hint);
-        buffer_handles.push_back(new_buffer);
+        output_buffer = gpu_executor->allocate_buffer(output_size, output_mem_hint);
     }
-
-    GPUBufferHandle output_buffer = buffer_handles.back();
 
     // Manage count buffer if requested, last buffer since it may or may not be included
     GPUBufferHandle count_buffer;
     if (gpu_task.count_buffer_active) {
         // This allows for 8 bytes of counting (64 bit size_t)
-        count_buffer = gpu_executor->allocate_buffer(COUNTER_BUFFER_SIZE, MemoryHint::HostVisible);
+        count_buffer = gpu_executor->allocate_buffer(COUNTER_BUFFER_SIZE, MemoryHint::Unified);
         buffer_handles.push_back(count_buffer);
     }
 
@@ -118,29 +91,33 @@ void Scheduler::visit(const GPUTask &gpu_task) {
 
     // In general *always* returning the computed back to the CPU is ineffecient
     // Should instead return an event that signals when the computation is done and data can be fetched if desired
-    std::function<void()> cpu_callback = [&]() {
+    std::function<void()> cpu_callback = [&, count_buffer, gpu_task, output_buffer]() {
         if (gpu_task.count_buffer_active) {
             // Find the number of bytes used for GPU output
-            std::vector<std::byte> byte_vec(COUNTER_BUFFER_SIZE);
-            std::span<std::byte> counted_span(byte_vec);
+            std::byte byte_span[COUNTER_BUFFER_SIZE];
+            std::span<std::byte> counted_span(byte_span);
             gpu_executor->copy_from_device(counted_span, count_buffer);
-            size_t counted_bytes = count_bytes_to_size(counted_span);
+            size_t counted_bytes = count_bytes_to_size(counted_span) * data_manager.get_type_size(gpu_task.output_id);
 
-            // Allocate memory/span on CPU for GPU output
-            // This is the earliest we could possibly form the span since only now we know the size
-            std::byte byte_array[counted_bytes];
-            std::span<std::byte> output_span(byte_array, counted_bytes);
-            this->gpu_executor->copy_from_device(output_span, count_buffer);
+            // Allocate (potentially) smaller memory/span on CPU for GPU output
+            std::vector<std::byte> byte_vec(counted_bytes);
+            std::span<std::byte> output_span(byte_vec);
+            gpu_executor->copy_from_device(output_span, output_buffer);
+
+            data_manager.store_data(gpu_task.output_id, output_span);
         } else {
             std::span<std::byte> output_span = data_manager.get_span_mut(gpu_task.output_id);
-            this->gpu_executor->copy_from_device(output_span, output_buffer);
+            gpu_executor->copy_from_device(output_span, output_buffer);
         }
 
         completed_queue.push_task(gpu_task.id);
     };
 
     // Assemble the kernel dispatch and assign it to the GPU
-    KernelDispatch kernel(gpu_task.task_name, buffer_handles, gpu_task.kernel_size, gpu_task.threads_per_group);
+    int num_block_threads = gpu_task.block_dim[0] * gpu_task.block_dim[1] * gpu_task.block_dim[2];
+    // Should probably try and distribute these evenly
+    std::vector<int> grid_dim = {(num_block_threads + gpu_task.threads - 1) / num_block_threads, 1, 1};
+    KernelDispatch kernel(gpu_task.task_name, buffer_handles, grid_dim, gpu_task.block_dim);
     gpu_executor->execute_kernel(kernel, cpu_callback);
 };
 

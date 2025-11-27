@@ -3,8 +3,8 @@
 #include <iostream>
 
 int main() {
-  id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-  std::cout << "Hello from CPU" << '\n';
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    std::cout << "Hello from CPU" << '\n';
 
-  return 0;
+    return 0;
 }

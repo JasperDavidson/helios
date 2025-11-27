@@ -16,8 +16,8 @@ class KernelDispatch {
   public:
     std::string kernel_name;
     std::vector<GPUBufferHandle> buffer_handles;
-    std::vector<int> kernel_size;
-    std::vector<int> threads_per_group;
+    std::vector<int> grid_dim;
+    std::vector<int> block_dim;
 
     bool operator==(const KernelDispatch &other) const { return this->kernel_name == other.kernel_name; };
 };
@@ -53,7 +53,7 @@ class IGPUExecutor {
     bool get_kernel_status(const std::string &kernel_name) { return kernel_status_[kernel_name]; }
 
     void map_data_to_buffer(int data_id, GPUBufferHandle &buffer_handle) { data_buffer_map_[data_id] = buffer_handle; }
-
+    GPUBufferHandle buffer_from_data(int data_id) { return data_buffer_map_[data_id]; };
     bool data_buffer_exists(int data_id) { return data_buffer_map_.find(data_id) != data_buffer_map_.end(); }
 
     virtual ~IGPUExecutor() = default;
@@ -66,11 +66,9 @@ class IGPUExecutor {
                            size_t unified_max_size, size_t hostvis_min_size, size_t hostvis_max_size);
         GPUMemoryAllocator();
 
+        uint64_t next_pow2(uint64_t x) { return x <= 1 ? 1 : 1 << (64 - __builtin_clz(x - 1)); }
         size_t allocate_memory(size_t mem_size, MemoryHint mem_hint);
         void check_free_mem(size_t mem_size, size_t mem_offset, MemoryHint mem_hint);
-
-      private:
-        std::unordered_map<MemoryHint, GPUBufferHandle> slab_map;
 
         size_t devloc_min_order;
         size_t devloc_max_order;
@@ -79,19 +77,23 @@ class IGPUExecutor {
         size_t unified_min_order;
         size_t unified_max_order;
 
-        uint64_t devloc_free_mask;
-        uint64_t hostvis_free_mask;
-        uint64_t unified_free_mask;
+        uint64_t devloc_free_mask = 0;
+        uint64_t hostvis_free_mask = 0;
+        uint64_t unified_free_mask = 0;
 
-        std::vector<std::vector<size_t>> devloc_size_address;
-        std::vector<std::vector<size_t>> unified_size_address;
-        std::vector<std::vector<size_t>> hostvis_size_address;
+        std::unordered_map<uint8_t, std::vector<size_t>> devloc_size_address;
+        std::unordered_map<uint8_t, std::vector<size_t>> unified_size_address;
+        std::unordered_map<uint8_t, std::vector<size_t>> hostvis_size_address;
+
+      private:
+        std::unordered_map<MemoryHint, GPUBufferHandle> slab_map;
+
         std::unordered_map<size_t, size_t> devloc_free_map;
         std::unordered_map<size_t, size_t> unified_free_map;
         std::unordered_map<size_t, size_t> hostvis_free_map;
 
         // helper function for selecting the current state variables based on memory type
-        void init_mem_types(uint64_t &free_mask, std::vector<std::vector<size_t>> &size_address,
+        void init_mem_types(uint64_t &free_mask, std::unordered_map<uint8_t, std::vector<size_t>> &size_address,
                             std::unordered_map<size_t, size_t>, MemoryHint mem_hint);
     };
 

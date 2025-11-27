@@ -112,21 +112,37 @@ MetalExecutor::MetalExecutor(std::pair<int, int> devloc_bounds, std::pair<int, i
                                        unified_bounds.second, hostvis_bounds.first, hostvis_bounds.second);
 
     if (devloc_bounds != std::pair(0, 0)) {
+        size_t devloc_size = devloc_bounds.second - devloc_bounds.second;
         p_metal_impl->devloc_slab_buffer_ =
-            [p_metal_impl->mtl_device_ newBufferWithLength:(devloc_bounds.second - devloc_bounds.first + 1)
-                                                   options:MTLResourceStorageModePrivate];
+            [p_metal_impl->mtl_device_ newBufferWithLength:devloc_size options:MTLResourceStorageModePrivate];
+        void *slab_address = [p_metal_impl->devloc_slab_buffer_ contents];
+
+        mem_allocator.devloc_free_mask |= (1 << (int)log2(mem_allocator.devloc_max_order));
+        mem_allocator.devloc_size_address[mem_allocator.next_pow2(devloc_size)].push_back((uintptr_t)slab_address);
     }
 
     if (hostvis_bounds != std::pair(0, 0)) {
+        size_t hostvis_size = hostvis_bounds.second - hostvis_bounds.second;
         p_metal_impl->hostvis_slab_buffer_ =
-            [p_metal_impl->mtl_device_ newBufferWithLength:(hostvis_bounds.second - hostvis_bounds.first + 1)
-                                                   options:MTLResourceStorageModeManaged];
+            [p_metal_impl->mtl_device_ newBufferWithLength:hostvis_size options:MTLResourceStorageModeManaged];
+        void *slab_address = [p_metal_impl->hostvis_slab_buffer_ contents];
+
+        mem_allocator.hostvis_free_mask |= (1 << (int)log2(mem_allocator.hostvis_max_order));
+        mem_allocator.devloc_size_address[mem_allocator.next_pow2(hostvis_size)].push_back((uintptr_t)slab_address);
     }
 
     if (unified_bounds != std::pair(0, 0)) {
+        size_t unified_size = unified_bounds.second - unified_bounds.second;
         p_metal_impl->unified_slab_buffer_ =
-            [p_metal_impl->mtl_device_ newBufferWithLength:(unified_bounds.second - unified_bounds.first + 1)
-                                                   options:MTLResourceStorageModeShared];
+            [p_metal_impl->mtl_device_ newBufferWithLength:unified_size options:MTLResourceStorageModeShared];
+        void *slab_address = [p_metal_impl->unified_slab_buffer_ contents];
+
+        std::cout << "Before shift: " << mem_allocator.unified_free_mask << std::endl;
+        mem_allocator.unified_free_mask |= (1 << (int)log2(mem_allocator.unified_max_order));
+        std::cout << "After shift: " << mem_allocator.unified_free_mask << std::endl;
+
+        mem_allocator.devloc_size_address[(int)log2(mem_allocator.unified_max_order)].push_back(
+            (uintptr_t)slab_address);
     }
 
     p_metal_impl->mtl_device_ = MTLCreateSystemDefaultDevice();
@@ -138,7 +154,9 @@ MetalExecutor::MetalExecutor(std::pair<int, int> devloc_bounds, std::pair<int, i
 
     p_metal_impl->pipeline_map_ = std::unordered_map<std::string, id<MTLComputePipelineState>>();
 
-    proxy_handle_ = allocate_buffer(proxy_size, MemoryHint::Unified);
+    if (proxy_size > 0) {
+        proxy_handle_ = allocate_buffer(proxy_size, MemoryHint::Unified);
+    }
 }
 
 // NOTE: This destructor may need to be filled in (e.g. deallocating slab buffers)
@@ -146,7 +164,9 @@ MetalExecutor::~MetalExecutor() = default;
 
 GPUBufferHandle MetalExecutor::allocate_buffer(std::size_t buffer_size, const MemoryHint mem_hint) {
     // Create the buffer handle object
+    std::cout << "Allocating memory..." << std::endl;
     size_t free_offset = mem_allocator.allocate_memory(buffer_size, mem_hint);
+    std::cout << "Allocated memory!" << std::endl;
     GPUBufferHandle buffer_handle(buffer_counter, mem_hint, free_offset, buffer_size);
     buffer_counter++;
 
@@ -163,7 +183,7 @@ GPUState MetalExecutor::deallocate_buffer(const GPUBufferHandle &buffer_handle) 
     //        return GPUState::GPUSuccess;
     //    }
 
-    return GPUState::GhostBuffer;
+    return GPUState::GPUSuccess;
 }
 
 void MetalExecutor::access_proxy(size_t data_size) {
@@ -365,9 +385,8 @@ GPUState MetalExecutor::execute_batch(const std::vector<KernelDispatch> &kernels
             [compute_encoder setBuffer:slab_bind_buffer offset:kernel.buffer_handles[j].mem_offset atIndex:j];
         }
 
-        MTLSize groups_per_grid = MTLSizeMake(kernel.kernel_size[0], kernel.kernel_size[1], kernel.kernel_size[2]);
-        MTLSize threads_per_group =
-            MTLSizeMake(kernel.threads_per_group[0], kernel.threads_per_group[1], kernel.threads_per_group[2]);
+        MTLSize groups_per_grid = MTLSizeMake(kernel.grid_dim[0], kernel.grid_dim[1], kernel.grid_dim[2]);
+        MTLSize threads_per_group = MTLSizeMake(kernel.block_dim[0], kernel.block_dim[1], kernel.block_dim[2]);
         [compute_encoder dispatchThreadgroups:groups_per_grid threadsPerThreadgroup:threads_per_group];
 
         // Update when each kernel ends individually, rather than when the entire batch ends

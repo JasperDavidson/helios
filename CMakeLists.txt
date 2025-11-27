@@ -13,14 +13,14 @@ target_link_libraries(Helios_ThreadPool PUBLIC Helios_Core)
 
 if(APPLE)
 	set(SHADER_SOURCE ${CMAKE_SOURCE_DIR}/src/MetalTest/test_kernel.metal)
-	set(SHADER_IR ${CMAKE_SOURCE_DIR}/src/MetalTest/test_kernel.air)
-	set(METALLIB_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/test_kernel.metallib)
+	set(SHADER_IR ${CMAKE_CURRENT_BINARY_DIR}/test_kernel.air)
+	set(METALLIB_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernels.metallib)
 
 	# Converting metal shaders to IR
 	add_custom_command(
 		OUTPUT ${SHADER_IR}
 		COMMAND xcrun -sdk macosx metal -c ${SHADER_SOURCE} -o ${SHADER_IR}
-		DEPENDS ${SHADER_IR}
+		DEPENDS ${SHADER_SOURCE}
 		COMMENT "Converting from kernel code to IR"
 	)
 	add_custom_target(ir_shaders DEPENDS ${SHADER_IR})
@@ -28,8 +28,8 @@ if(APPLE)
 	# Create the metal executable and link it with the .metallib dependency
 	add_custom_command(
 		OUTPUT ${METALLIB_OUTPUT}
-		COMMAND xcrun -sdk macosx metallib -c ${SHADER_IR} -o ${METALLIB_OUTPUT}
-		DEPENDS ${SHADER_SOURCE}
+		COMMAND xcrun -sdk macosx metallib -o ${METALLIB_OUTPUT} ${SHADER_IR}
+		DEPENDS ${SHADER_IR}
 		COMMENT "Compiling metal shaders"
 	)
 	add_custom_target(compile_shaders DEPENDS ${METALLIB_OUTPUT})

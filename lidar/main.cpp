@@ -1,10 +1,8 @@
 #include "DataManager.h"
 #include "Runtime.h"
 #include "Tasks.h"
-#include <algorithm>
 #include <chrono>
 #include <iostream>
-#include <iterator>
 #include <stdexcept>
 #include <tuple>
 #include <vector>
@@ -65,15 +63,17 @@ void benchmark(DataManager &data_manager, int num_tasks, auto hash_lambda, F &&t
 
     for (int num_threads = 2; num_threads <= MACBOOK_PROCESS_THREADS; ++num_threads) {
         Runtime helios_runtime(data_manager, num_threads);
-        GPUDevice device(GPUBackend::Cuda, std::pair(2, 256), std::pair(2, 256), std::pair(2, 256));
+        GPUDevice device(GPUBackend::Metal, std::pair(2, 256), std::pair(2, 256), std::pair(2, 256));
 
         TaskGraph task_graph;
 
         std::vector<ResultType> results(num_tasks);
+        // auto gpu_test_task = GPUTask();
 
         std::cout << "(Helios) Benchmarking with " << num_threads << " threads" << std::endl;
         for (int n_task = 0; n_task < num_tasks; ++n_task) {
-            auto result_handle = data_manager.create_ref_handle(&(results[n_task]));
+            auto result_handle =
+                data_manager.create_ref_handle(&(results[n_task]), DataUsage::ReadWrite, MemoryHint::Unified);
             std::string name = "benchmark" + std::to_string(n_task);
             auto benchmark_task = TypedCPUTask(name, input_ids, result_handle.id, data_manager, task, args...);
 

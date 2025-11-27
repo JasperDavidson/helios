@@ -77,12 +77,12 @@ class GPUTask : public ITask {
     //  or opt into buffer counting
   public:
     GPUTask(const std::string &task_name, const std::vector<int> &input_ids, int output_id, bool count_buffer_active,
-            const std::vector<int> &kernel_size, const std::vector<int> &threads_per_group)
-        : ITask(task_name, input_ids, output_id), count_buffer_active(count_buffer_active), kernel_size(kernel_size),
-          threads_per_group(threads_per_group) {};
+            int threads, const std::vector<int> &block_dim = {8, 8, 8})
+        : ITask(task_name, input_ids, output_id), count_buffer_active(count_buffer_active), threads(threads),
+          block_dim(block_dim) {};
 
-    std::vector<int> kernel_size;
-    std::vector<int> threads_per_group;
+    int threads;
+    std::vector<int> block_dim;
     bool count_buffer_active;
 
   private:
