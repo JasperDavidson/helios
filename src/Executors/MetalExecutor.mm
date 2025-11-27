@@ -145,11 +145,19 @@ MetalExecutor::MetalExecutor(std::pair<int, int> devloc_bounds, std::pair<int, i
     p_metal_impl->pipeline_map_ = std::unordered_map<std::string, id<MTLComputePipelineState>>();
 
     if (proxy_size > 0) {
+        // TODO: Make the free map hierarchical
+        // Currently the free map will find addresses outside of the order that was expected
         proxy_handle_ = allocate_buffer(proxy_size, MemoryHint::Unified);
         GPUBufferHandle buffer_test = allocate_buffer(32, MemoryHint::Unified);
-        mem_allocator.check_free_mem(32, buffer_test.mem_offset, buffer_test.mem_hint);
-        mem_allocator.check_free_mem(proxy_size, proxy_handle_.mem_offset, proxy_handle_.mem_hint);
         GPUBufferHandle buffer_test2 = allocate_buffer(32, MemoryHint::Unified);
+        GPUBufferHandle buffer_test3 = allocate_buffer(32, MemoryHint::Unified);
+        // mem_allocator.check_free_mem(proxy_handle_.size, proxy_handle_.mem_offset, proxy_handle_.mem_hint);
+        GPUBufferHandle buffer_test4 = allocate_buffer(64, MemoryHint::Unified);
+        mem_allocator.check_free_mem(buffer_test2.size, buffer_test2.mem_offset, buffer_test2.mem_hint);
+        mem_allocator.check_free_mem(buffer_test.size, buffer_test.mem_offset, buffer_test.mem_hint);
+        mem_allocator.check_free_mem(buffer_test3.size, buffer_test3.mem_offset, buffer_test3.mem_hint);
+        mem_allocator.check_free_mem(buffer_test4.size, buffer_test4.mem_offset, buffer_test4.mem_hint);
+        //         proxy_handle_ = allocate_buffer(proxy_size, MemoryHint::Unified);
     }
 }
 
@@ -160,7 +168,7 @@ GPUBufferHandle MetalExecutor::allocate_buffer(std::size_t buffer_size, const Me
     // Create the buffer handle object
     std::cout << "Allocating memory..." << std::endl;
     size_t free_offset = mem_allocator.allocate_memory(buffer_size, mem_hint);
-    std::cout << "Allocated memory!" << std::endl;
+    std::cout << "Allocated memory!" << " buffer offset: " << free_offset << std::endl;
     GPUBufferHandle buffer_handle(buffer_counter, mem_hint, free_offset, buffer_size);
     buffer_counter++;
 
