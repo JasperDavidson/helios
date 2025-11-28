@@ -76,7 +76,7 @@ target_include_directories(mem_alloc_test PUBLIC inc)
 target_link_libraries(
 	mem_alloc_test
 	Helios_Core
-	GTest::gtest_main)
+	GTest::gmock_main)
 
 include(GoogleTest)
 gtest_discover_tests(mem_alloc_test)

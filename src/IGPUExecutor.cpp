@@ -1,5 +1,6 @@
 #include "IGPUExecutor.h"
 #include "DataManager.h"
+#include <algorithm>
 #include <cstdint>
 #include <stdexcept>
 #include <unordered_map>
@@ -36,23 +37,32 @@ void IGPUExecutor::GPUMemoryAllocator::init_mem_types(
     // Fetch the relevant instance variables based on memory hint
     switch (mem_hint) {
     case MemoryHint::Unified:
+        if (unified_max_order == 0) {
+            throw std::runtime_error("Tried to allocate memory of invalid type: Unified");
+        }
+
         free_mask = &unified_free_mask;
         size_address = &unified_size_address;
         free_map = &unified_free_map;
         break;
     case MemoryHint::HostVisible:
+        if (hostvis_max_order == 0) {
+            throw std::runtime_error("Tried to allocate memory of invalid type: HostVisible");
+        }
+
         free_mask = &hostvis_free_mask;
         size_address = &hostvis_size_address;
         free_map = &hostvis_free_map;
         break;
     case MemoryHint::DeviceLocal:
+        if (devloc_max_order == 0) {
+            throw std::runtime_error("Tried to allocate memory of invalid type: DeviceLocal");
+        }
+
         free_mask = &devloc_free_mask;
         size_address = &devloc_size_address;
         free_map = &devloc_free_map;
         break;
-    default:
-        // Could possibly throw this on a per system level as well? (e.g. some systems won't have unified)
-        throw std::runtime_error("Tried to allocate memory of invalid type");
     }
 }
 
@@ -66,19 +76,37 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
     std::unordered_map<size_t, std::unordered_map<size_t, size_t>> *free_map = nullptr;
     init_mem_types(free_mask, size_address, free_map, mem_hint);
 
+    size_t min_order = 0;
+    switch (mem_hint) {
+    case MemoryHint::DeviceLocal:
+        min_order = devloc_min_order;
+        break;
+    case MemoryHint::Unified:
+        min_order = unified_min_order;
+        break;
+    case MemoryHint::HostVisible:
+        min_order = hostvis_min_order;
+        break;
+    default:
+        throw std::runtime_error("Tried to work with memory of invalid type");
+    }
+    min_order = std::max(min_order, order);
+
     uint64_t search_mask = (*free_mask) & ~((1ULL << order) - 1);
-    std::cout << "Free mask: " << std::bitset<64>(*free_mask) << std::endl;
-    std::cout << "Search mask: " << std::bitset<64>(search_mask) << std::endl;
+    // std::cout << "Free mask before alloc: " << std::bitset<64>(*free_mask) << std::endl;
+    //    std::cout << "Search mask: " << std::bitset<64>(search_mask) << std::endl;
     if (search_mask == 0) {
         // Find some way to more effectively handle being out of memory
         // Some sort of futures system or multithreading?
-        throw std::runtime_error("No space left on GPU!");
+        throw std::runtime_error("No space available on GPU for block size!");
     }
 
     int next_free_order = __builtin_ctzll(search_mask);
     size_t next_free_addr = (*size_address)[next_free_order].back();
 
     // Free the newly created split at next_free_addr
+    //    std::cout << "size addr size before: " << (*size_address)[next_free_order].size() << std::endl;
+    //    std::cout << "free map size before: " << (*free_map)[next_free_order].size() << std::endl;
     (*size_address)[next_free_order].pop_back();
     (*free_map)[next_free_order].erase(next_free_addr);
 
@@ -88,7 +116,9 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
     }
 
     // Break down the buddy addresses to provide space
-    for (int cur_order = next_free_order; order < cur_order; cur_order--) {
+    //   std::cout << "next free order: " << next_free_order << std::endl;
+    //    std::cout << "end order: " << order << std::endl;
+    for (int cur_order = next_free_order; min_order < cur_order; cur_order--) {
         int split_order = cur_order - 1;
 
         // Add both blocks to their respective free lists
@@ -102,7 +132,9 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
         (*free_mask) |= (1ULL << (split_order));
     }
 
-    std::cout << "Free mask after: " << std::bitset<64>(*free_mask) << std::endl;
+    //  std::cout << "Free mask after alloc: " << std::bitset<64>(*free_mask) << std::endl;
+    //    std::cout << "size addr size after: " << (*size_address)[next_free_order].size() << std::endl;
+    //    std::cout << "free map size after: " << (*free_map)[next_free_order].size() << std::endl;
     return next_free_addr;
 }
 
@@ -128,16 +160,21 @@ void IGPUExecutor::GPUMemoryAllocator::check_free_mem(size_t mem_size, size_t of
         throw std::runtime_error("Tried to work with memory of invalid type");
     }
 
+    // std::cout << "free mask before free: " << std::bitset<64>(*free_mask) << std::endl;
+
     size_t new_free_addr = offset;
     size_t cur_order = (int)log2(next_pow2(mem_size));
 
     while (cur_order < max_order) {
         size_t buddy_address = new_free_addr ^ (1ULL << (cur_order));
+        //   std::cout << "buddy address: " << buddy_address << std::endl;
 
         // Check if merging can begin
         if ((*free_map)[cur_order].find(buddy_address) == (*free_map)[cur_order].end()) {
+            //     std::cout << "did not find buddy" << std::endl;
             break;
         }
+        //  std::cout << "found buddy" << std::endl;
 
         // Remove buddy from list and map
         int buddy_order_idx = (*free_map)[cur_order][buddy_address];
@@ -164,4 +201,5 @@ void IGPUExecutor::GPUMemoryAllocator::check_free_mem(size_t mem_size, size_t of
     (*size_address)[cur_order].push_back(new_free_addr);
     (*free_map)[cur_order][new_free_addr] = (*size_address)[cur_order].size() - 1;
     (*free_mask) |= (1ULL << cur_order);
+    // std::cout << "free mask after free: " << std::bitset<64>(*free_mask) << std::endl;
 }
