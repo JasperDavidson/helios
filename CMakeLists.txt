@@ -64,13 +64,23 @@ target_link_libraries(
 	Helios_MetalExecutor
 )
 
-# include(FetchContent)
-# FetchContent_Declare(
-#   googletest
-#   URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
-# )
-# FetchContent_MakeAvailable(googletest)
-# 
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+)
+FetchContent_MakeAvailable(googletest)
+
+add_executable(mem_alloc_test tests/gpu_mem_alloc_tests.cpp)
+target_include_directories(mem_alloc_test PUBLIC inc)
+target_link_libraries(
+	mem_alloc_test
+	Helios_Core
+	GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(mem_alloc_test)
+
 # add_executable(pool_test tests/thread_pool_tests.cpp)
 # target_include_directories(pool_test PUBLIC inc)
 # 

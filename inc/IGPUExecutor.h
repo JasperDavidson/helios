@@ -58,7 +58,6 @@ class IGPUExecutor {
 
     virtual ~IGPUExecutor() = default;
 
-  protected:
     // Class to handle memory allocation efficiently through the buddy system
     class GPUMemoryAllocator {
       public:
@@ -85,12 +84,12 @@ class IGPUExecutor {
         std::unordered_map<uint8_t, std::vector<size_t>> unified_size_address;
         std::unordered_map<uint8_t, std::vector<size_t>> hostvis_size_address;
 
-      private:
-        std::unordered_map<MemoryHint, GPUBufferHandle> slab_map;
-
         std::unordered_map<size_t, std::unordered_map<size_t, size_t>> devloc_free_map;
         std::unordered_map<size_t, std::unordered_map<size_t, size_t>> unified_free_map;
         std::unordered_map<size_t, std::unordered_map<size_t, size_t>> hostvis_free_map;
+
+      private:
+        std::unordered_map<MemoryHint, GPUBufferHandle> slab_map;
 
         // helper function for selecting the current state variables based on memory type
         void init_mem_types(uint64_t *&free_mask, std::unordered_map<uint8_t, std::vector<size_t>> *&size_address,
@@ -98,6 +97,7 @@ class IGPUExecutor {
                             MemoryHint mem_hint);
     };
 
+  protected:
     // Allows for the scheduler to check the status of kernels it has dispatched (kernel name -> future promise)
     // Is this needed still?
     std::unordered_map<std::string, bool> kernel_status_;
