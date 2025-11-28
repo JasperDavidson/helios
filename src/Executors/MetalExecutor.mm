@@ -115,24 +115,18 @@ MetalExecutor::MetalExecutor(std::pair<int, int> devloc_bounds, std::pair<int, i
         size_t devloc_size = devloc_bounds.second - devloc_bounds.first;
         p_metal_impl->devloc_slab_buffer_ =
             [p_metal_impl->mtl_device_ newBufferWithLength:devloc_size options:MTLResourceStorageModePrivate];
-
-        mem_allocator.devloc_size_address[mem_allocator.devloc_max_order].push_back(0);
     }
 
     if (hostvis_bounds != std::pair(0, 0)) {
         size_t hostvis_size = hostvis_bounds.second - hostvis_bounds.first;
         p_metal_impl->hostvis_slab_buffer_ =
             [p_metal_impl->mtl_device_ newBufferWithLength:hostvis_size options:MTLResourceStorageModeManaged];
-
-        mem_allocator.hostvis_size_address[mem_allocator.hostvis_max_order].push_back(0);
     }
 
     if (unified_bounds != std::pair(0, 0)) {
         size_t unified_size = unified_bounds.second - unified_bounds.first;
         p_metal_impl->unified_slab_buffer_ =
             [p_metal_impl->mtl_device_ newBufferWithLength:unified_size options:MTLResourceStorageModeShared];
-
-        mem_allocator.unified_size_address[mem_allocator.unified_max_order].push_back(0);
     }
 
     p_metal_impl->mtl_device_ = MTLCreateSystemDefaultDevice();
@@ -151,13 +145,13 @@ MetalExecutor::MetalExecutor(std::pair<int, int> devloc_bounds, std::pair<int, i
         GPUBufferHandle buffer_test = allocate_buffer(32, MemoryHint::Unified);
         GPUBufferHandle buffer_test2 = allocate_buffer(32, MemoryHint::Unified);
         GPUBufferHandle buffer_test3 = allocate_buffer(32, MemoryHint::Unified);
-        // mem_allocator.check_free_mem(proxy_handle_.size, proxy_handle_.mem_offset, proxy_handle_.mem_hint);
         GPUBufferHandle buffer_test4 = allocate_buffer(64, MemoryHint::Unified);
+        mem_allocator.check_free_mem(proxy_handle_.size, proxy_handle_.mem_offset, proxy_handle_.mem_hint);
         mem_allocator.check_free_mem(buffer_test2.size, buffer_test2.mem_offset, buffer_test2.mem_hint);
         mem_allocator.check_free_mem(buffer_test.size, buffer_test.mem_offset, buffer_test.mem_hint);
         mem_allocator.check_free_mem(buffer_test3.size, buffer_test3.mem_offset, buffer_test3.mem_hint);
         mem_allocator.check_free_mem(buffer_test4.size, buffer_test4.mem_offset, buffer_test4.mem_hint);
-        //         proxy_handle_ = allocate_buffer(proxy_size, MemoryHint::Unified);
+        proxy_handle_ = allocate_buffer(proxy_size, MemoryHint::Unified);
     }
 }
 

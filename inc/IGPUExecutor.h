@@ -88,13 +88,14 @@ class IGPUExecutor {
       private:
         std::unordered_map<MemoryHint, GPUBufferHandle> slab_map;
 
-        std::unordered_map<size_t, uint16_t> devloc_free_map;
-        std::unordered_map<size_t, uint16_t> unified_free_map;
-        std::unordered_map<size_t, uint16_t> hostvis_free_map;
+        std::unordered_map<size_t, std::unordered_map<size_t, size_t>> devloc_free_map;
+        std::unordered_map<size_t, std::unordered_map<size_t, size_t>> unified_free_map;
+        std::unordered_map<size_t, std::unordered_map<size_t, size_t>> hostvis_free_map;
 
         // helper function for selecting the current state variables based on memory type
         void init_mem_types(uint64_t *&free_mask, std::unordered_map<uint8_t, std::vector<size_t>> *&size_address,
-                            std::unordered_map<size_t, uint16_t> *&free_map, MemoryHint mem_hint);
+                            std::unordered_map<size_t, std::unordered_map<size_t, size_t>> *&free_map,
+                            MemoryHint mem_hint);
     };
 
     // Allows for the scheduler to check the status of kernels it has dispatched (kernel name -> future promise)

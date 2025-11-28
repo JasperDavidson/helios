@@ -14,22 +14,25 @@ IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator(size_t devloc_min_size, siz
     hostvis_min_order = (int)log2(next_pow2(hostvis_min_size));
     hostvis_max_order = (int)log2(next_pow2(hostvis_max_size));
 
-    devloc_free_mask = (1 << devloc_max_order);
-    unified_free_mask = (1 << unified_max_order);
-    hostvis_free_mask = (1 << hostvis_max_order);
+    devloc_free_mask = (1ULL << devloc_max_order);
+    unified_free_mask = (1ULL << unified_max_order);
+    hostvis_free_mask = (1ULL << hostvis_max_order);
 
-    // Maybe not 0 here? Figure out what the mem offset is
-    // devloc_free_map[0] = true;
-    // unified_free_map[0] = true;
-    // hostvis_free_map[0] = true;
+    devloc_size_address[devloc_max_order].push_back(0);
+    devloc_free_map[devloc_max_order][0] = 0;
+
+    unified_size_address[unified_max_order].push_back(0);
+    unified_free_map[unified_max_order][0] = 0;
+
+    hostvis_size_address[hostvis_max_order].push_back(0);
+    hostvis_free_map[hostvis_max_order][0] = 0;
 };
 
 IGPUExecutor::GPUMemoryAllocator::GPUMemoryAllocator() : GPUMemoryAllocator(0, 0, 0, 0, 0, 0) {};
 
-void IGPUExecutor::GPUMemoryAllocator::init_mem_types(uint64_t *&free_mask,
-                                                      std::unordered_map<uint8_t, std::vector<size_t>> *&size_address,
-                                                      std::unordered_map<size_t, uint16_t> *&free_map,
-                                                      MemoryHint mem_hint) {
+void IGPUExecutor::GPUMemoryAllocator::init_mem_types(
+    uint64_t *&free_mask, std::unordered_map<uint8_t, std::vector<size_t>> *&size_address,
+    std::unordered_map<size_t, std::unordered_map<size_t, size_t>> *&free_map, MemoryHint mem_hint) {
     // Fetch the relevant instance variables based on memory hint
     switch (mem_hint) {
     case MemoryHint::Unified:
@@ -60,7 +63,7 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
     // Fetch the relevant instance variables based on memory hint
     uint64_t *free_mask = nullptr;
     std::unordered_map<uint8_t, std::vector<size_t>> *size_address = nullptr;
-    std::unordered_map<size_t, uint16_t> *free_map = nullptr;
+    std::unordered_map<size_t, std::unordered_map<size_t, size_t>> *free_map = nullptr;
     init_mem_types(free_mask, size_address, free_map, mem_hint);
 
     uint64_t search_mask = (*free_mask) & ~((1 << order) - 1);
@@ -78,8 +81,8 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
     // Return if free block already available
     if (next_free_order == order) {
         (*size_address)[next_free_order].pop_back();
-        (*free_map).erase(next_free_addr);
-        if ((*size_address)[next_free_addr].size() == 0) {
+        (*free_map)[order].erase(next_free_addr);
+        if ((*size_address)[next_free_order].size() == 0) {
             (*free_mask) &= (~(1 << next_free_order));
         }
         std::cout << "Free mask after: " << std::bitset<64>(*free_mask) << std::endl;
@@ -92,7 +95,9 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
         (*size_address)[cur_order].pop_back();
 
         // Unmark the previous order as free if necessary
+        std::cout << "order " << cur_order << " size: " << (*size_address)[cur_order].size() << std::endl;
         if ((*size_address)[cur_order].empty()) {
+            std::cout << "unmark" << std::endl;
             (*free_mask) &= (~(1 << cur_order));
         }
 
@@ -102,7 +107,7 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
         (*size_address)[cur_order - 1].push_back(next_free_addr);
 
         // Assign the right address be free in the free map
-        (*free_map)[right_addr] = (*size_address)[cur_order - 1].size() - 2;
+        (*free_map)[cur_order - 1][right_addr] = (*size_address)[cur_order - 1].size() - 2;
 
         // Mark the current order as containing a free block
         (*free_mask) |= (1 << (cur_order - 1));
@@ -110,6 +115,7 @@ size_t IGPUExecutor::GPUMemoryAllocator::allocate_memory(size_t mem_size, Memory
 
     // Free the newly created split at next_free_addr
     (*size_address)[order].pop_back();
+    (*free_map)[order].erase(next_free_addr);
 
     std::cout << "Free mask after: " << std::bitset<64>(*free_mask) << std::endl;
     return next_free_addr;
@@ -119,7 +125,7 @@ void IGPUExecutor::GPUMemoryAllocator::check_free_mem(size_t mem_size, size_t of
     // Fetch the relevant instance variables based on memory hint
     uint64_t *free_mask = nullptr;
     std::unordered_map<uint8_t, std::vector<size_t>> *size_address = nullptr;
-    std::unordered_map<size_t, uint16_t> *free_map = nullptr;
+    std::unordered_map<size_t, std::unordered_map<size_t, size_t>> *free_map = nullptr;
     init_mem_types(free_mask, size_address, free_map, mem_hint);
 
     size_t max_order = 0;
@@ -143,24 +149,29 @@ void IGPUExecutor::GPUMemoryAllocator::check_free_mem(size_t mem_size, size_t of
 
     while (cur_order < max_order) {
         size_t buddy_address = new_free_addr ^ (1 << (cur_order));
+        std::cout << "buddy address: " << buddy_address << std::endl;
 
         // Check if merging can begin
-        if ((*free_map).find(buddy_address) == (*free_map).end()) {
+        if ((*free_map)[cur_order].find(buddy_address) == (*free_map)[cur_order].end()) {
+            std::cout << "Buddy not found" << std::endl;
             break;
         }
 
+        std::cout << "Buddy found" << std::endl;
+
         // Remove buddy from list and map
-        int buddy_order_idx = (*free_map)[buddy_address];
+        int buddy_order_idx = (*free_map)[cur_order][buddy_address];
         size_t last_elem = (*size_address)[cur_order].back();
 
         // Swap and pop buddy with back element
         (*size_address)[cur_order][buddy_order_idx] = last_elem;
-        (*free_map)[last_elem] = buddy_order_idx;
+        (*free_map)[cur_order][last_elem] = buddy_order_idx;
         (*size_address)[cur_order].pop_back();
-        (*free_map).erase(buddy_address);
+        (*free_map)[cur_order].erase(buddy_address);
 
         // Prepare for next iteration
         if ((*size_address)[cur_order].empty()) {
+            std::cout << "Empty" << std::endl;
             (*free_mask) &= (~(1 << cur_order));
         }
         if (buddy_address < new_free_addr) {
@@ -168,10 +179,10 @@ void IGPUExecutor::GPUMemoryAllocator::check_free_mem(size_t mem_size, size_t of
         }
 
         cur_order++;
-
-        // Mark as free memory after merging complete
-        (*size_address)[cur_order].push_back(new_free_addr);
-        (*free_map)[new_free_addr] = (*size_address)[cur_order].size() - 1;
-        (*free_mask) |= (1 << cur_order);
     }
+
+    // Mark as free memory after merging complete
+    (*size_address)[cur_order].push_back(new_free_addr);
+    (*free_map)[cur_order][new_free_addr] = (*size_address)[cur_order].size() - 1;
+    (*free_mask) |= (1 << cur_order);
 }
