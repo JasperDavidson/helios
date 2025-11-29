@@ -32,6 +32,12 @@ class GPUMemoryAllocatorTest : public testing::Test {
 
     IGPUExecutor::GPUMemoryAllocator mem_alloc = IGPUExecutor::GPUMemoryAllocator(
         min_devloc_size, max_devloc_size, min_unified_size, max_unified_size, min_hostivs_size, max_hostvis_size);
+
+    void check_none_free() {
+        EXPECT_EQ(1 << mem_alloc.unified_max_order, mem_alloc.unified_free_mask);
+        EXPECT_EQ(1, mem_alloc.unified_size_address[mem_alloc.unified_max_order].size());
+        EXPECT_EQ(1, mem_alloc.unified_free_map[mem_alloc.unified_max_order].size());
+    }
 };
 
 // ****************************
@@ -41,6 +47,7 @@ class GPUMemoryAllocatorTest : public testing::Test {
 // Tests allocating blocks below minimum size
 TEST_F(GPUMemoryAllocatorTest, AllocBelowMin) {
     size_t below_min_offset = mem_alloc.allocate_memory(pow(2, mem_alloc.unified_min_order - 1), MemoryHint::Unified);
+    EXPECT_EQ(1, mem_alloc.unified_size_address[mem_alloc.unified_min_order].size());
 
     uint64_t expected_mask = max_unified_size - min_unified_size;
     EXPECT_EQ(expected_mask, mem_alloc.unified_free_mask);
@@ -144,52 +151,129 @@ TEST_F(GPUMemoryAllocatorTest, FullAllocFreeMin) {
 
     // Test that all memory gets merged after free of only block
     mem_alloc.check_free_mem(min_unified_size, min_offset, MemoryHint::Unified);
-    EXPECT_EQ(max_unified_size, mem_alloc.unified_free_mask);
-    EXPECT_EQ(1, mem_alloc.unified_size_address[mem_alloc.unified_max_order].size());
-    EXPECT_EQ(1, mem_alloc.unified_free_map[mem_alloc.unified_max_order].size());
+    check_none_free();
 }
 
-// Check that buddies (and memory generally when uniform) allocate contiguously
-TEST_F(GPUMemoryAllocatorTest, BuddyAllocationContiguous) {
+// Tests that memory is correctly taken up in a subsection after allocating the full spectrum
+TEST_F(GPUMemoryAllocatorTest, AllocMiddleAfterMin) {
+    size_t min_offset = mem_alloc.allocate_memory(min_unified_size, MemoryHint::Unified);
     int middle_order =
         mem_alloc.unified_min_order + (int)(mem_alloc.unified_max_order - mem_alloc.unified_min_order) / 2;
-    int middle_size = pow(2, middle_order);
+    int middle_size = 1 << middle_order;
+    size_t middle_offset = mem_alloc.allocate_memory(middle_size, MemoryHint::Unified);
 
-    // Test that free sizes appropriately change as same-size memory is allocated
+    EXPECT_EQ(0, mem_alloc.unified_size_address[middle_order].size());
+    EXPECT_EQ(0, mem_alloc.unified_free_map[middle_order].size());
+}
+
+// ****************************
+// Buddy Tests
+// ****************************
+
+// Check that correct free space is reflected when only middle buddies are allocated
+TEST_F(GPUMemoryAllocatorTest, MiddleBuddyFreeSpace) {
+    int middle_order =
+        mem_alloc.unified_min_order + (int)(mem_alloc.unified_max_order - mem_alloc.unified_min_order) / 2;
+    int middle_size = 1 << middle_order;
     size_t block_offset = mem_alloc.allocate_memory(middle_size, MemoryHint::Unified);
+
     for (int cur_order = middle_order + 1; cur_order < mem_alloc.unified_max_order; ++cur_order) {
         EXPECT_EQ(1, mem_alloc.unified_size_address[cur_order].size());
         EXPECT_EQ(1, mem_alloc.unified_free_map[cur_order].size());
     }
 
     size_t buddy_offset = mem_alloc.allocate_memory(middle_size, MemoryHint::Unified);
-    EXPECT_EQ(buddy_offset, block_offset + pow(2, middle_order));
+
     for (int cur_order = middle_order; cur_order > mem_alloc.unified_min_order; --cur_order) {
         EXPECT_EQ(0, mem_alloc.unified_size_address[cur_order].size());
         EXPECT_EQ(0, mem_alloc.unified_free_map[cur_order].size());
     }
 
+    mem_alloc.check_free_mem(middle_size, block_offset, MemoryHint::Unified);
+    mem_alloc.check_free_mem(middle_size, buddy_offset, MemoryHint::Unified);
+
+    check_none_free();
+}
+
+// Check that buddies (and memory generally when uniform) allocate contiguously
+TEST_F(GPUMemoryAllocatorTest, BuddyAllocationContiguous) {
+    int middle_order =
+        mem_alloc.unified_min_order + (int)(mem_alloc.unified_max_order - mem_alloc.unified_min_order) / 2;
+    int middle_size = 1 << middle_order;
+    size_t block_offset = mem_alloc.allocate_memory(middle_size, MemoryHint::Unified);
+
+    size_t buddy_offset = mem_alloc.allocate_memory(middle_size, MemoryHint::Unified);
+    EXPECT_EQ(buddy_offset, block_offset + middle_size);
+
     size_t outlier_offset = mem_alloc.allocate_memory(middle_size, MemoryHint::Unified);
-    EXPECT_EQ(outlier_offset, buddy_offset + pow(2, middle_order));
+    EXPECT_EQ(outlier_offset, buddy_offset + middle_size);
     EXPECT_EQ(0, mem_alloc.unified_size_address[middle_order + 1].size());
     EXPECT_EQ(0, mem_alloc.unified_free_map[middle_order + 1].size());
 
-    // Test that all memory gets merged after free of all blocks
     mem_alloc.check_free_mem(middle_size, block_offset, MemoryHint::Unified);
     mem_alloc.check_free_mem(middle_size, outlier_offset, MemoryHint::Unified);
     mem_alloc.check_free_mem(middle_size, buddy_offset, MemoryHint::Unified);
 
-    EXPECT_EQ(max_unified_size, mem_alloc.unified_free_mask);
-    EXPECT_EQ(1, mem_alloc.unified_size_address[mem_alloc.unified_max_order].size());
-    EXPECT_EQ(1, mem_alloc.unified_free_map[mem_alloc.unified_max_order].size());
+    check_none_free();
 }
 
-// Allocate min then allocate buddy in middle
-TEST_F(GPUMemoryAllocatorTest, AllocMiddleAfterMin) {}
+// ****************************
+// Advanced Functionality Tests
+// ****************************
 
-// Allocate across full range
+// Tests freeing allocated memory "out of order"
+TEST_F(GPUMemoryAllocatorTest, OutOfOrder) {
+    size_t a_offset = mem_alloc.allocate_memory(min_unified_size, MemoryHint::Unified);
+    size_t b_offset = mem_alloc.allocate_memory(min_unified_size, MemoryHint::Unified);
+    size_t c_offset = mem_alloc.allocate_memory(min_unified_size, MemoryHint::Unified);
+    size_t d_offset = mem_alloc.allocate_memory(min_unified_size, MemoryHint::Unified);
 
-// Regression tests
-// TEST_F(GPUMemoryAllocatorTest, BuddyRegressionTest)
+    EXPECT_EQ(0, mem_alloc.unified_free_map[mem_alloc.unified_min_order].size());
+    EXPECT_EQ(0, mem_alloc.unified_size_address[mem_alloc.unified_min_order].size());
 
-// Out of order tests
+    mem_alloc.check_free_mem(min_unified_size, c_offset, MemoryHint::Unified);
+    EXPECT_EQ(1, mem_alloc.unified_free_map[mem_alloc.unified_min_order].size());
+    EXPECT_EQ(1, mem_alloc.unified_size_address[mem_alloc.unified_min_order].size());
+    c_offset = mem_alloc.allocate_memory(min_unified_size, MemoryHint::Unified);
+    EXPECT_EQ(c_offset, min_unified_size * 2);
+
+    mem_alloc.check_free_mem(min_unified_size, b_offset, MemoryHint::Unified);
+    EXPECT_EQ(1, mem_alloc.unified_free_map[mem_alloc.unified_min_order].size());
+    EXPECT_EQ(1, mem_alloc.unified_size_address[mem_alloc.unified_min_order].size());
+
+    mem_alloc.check_free_mem(min_unified_size, d_offset, MemoryHint::Unified);
+    EXPECT_EQ(2, mem_alloc.unified_free_map[mem_alloc.unified_min_order].size());
+    EXPECT_EQ(2, mem_alloc.unified_size_address[mem_alloc.unified_min_order].size());
+
+    mem_alloc.check_free_mem(min_unified_size, a_offset, MemoryHint::Unified);
+    EXPECT_EQ(1, mem_alloc.unified_free_map[mem_alloc.unified_min_order].size());
+    EXPECT_EQ(1, mem_alloc.unified_size_address[mem_alloc.unified_min_order].size());
+
+    mem_alloc.check_free_mem(min_unified_size, c_offset, MemoryHint::Unified);
+    EXPECT_EQ(0, mem_alloc.unified_free_map[mem_alloc.unified_min_order].size());
+    EXPECT_EQ(0, mem_alloc.unified_size_address[mem_alloc.unified_min_order].size());
+
+    check_none_free();
+}
+
+// Tests double free reactivity
+TEST_F(GPUMemoryAllocatorTest, DoubleFreeReaction) {
+    int middle_order =
+        mem_alloc.unified_min_order + (int)(mem_alloc.unified_max_order - mem_alloc.unified_min_order) / 2;
+    int middle_size = 1 << middle_order;
+
+    size_t block_offset = mem_alloc.allocate_memory(middle_size, MemoryHint::Unified);
+    size_t buddy_offset = mem_alloc.allocate_memory(middle_size, MemoryHint::Unified);
+    mem_alloc.check_free_mem(middle_size, block_offset, MemoryHint::Unified);
+
+    EXPECT_THROW(
+        {
+            try {
+                mem_alloc.check_free_mem(middle_size, block_offset, MemoryHint::Unified);
+            } catch (std::runtime_error &e) {
+                EXPECT_STREQ("CRITICAL: Attempted to free memory twice", e.what());
+                throw;
+            }
+        },
+        std::runtime_error);
+}

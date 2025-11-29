@@ -165,6 +165,11 @@ void IGPUExecutor::GPUMemoryAllocator::check_free_mem(size_t mem_size, size_t of
     size_t new_free_addr = offset;
     size_t cur_order = (int)log2(next_pow2(mem_size));
 
+    // Catch if a double free occurs
+    if ((*free_map)[cur_order].find(new_free_addr) != (*free_map)[cur_order].end()) {
+        throw std::runtime_error("CRITICAL: Attempted to free memory twice");
+    }
+
     while (cur_order < max_order) {
         size_t buddy_address = new_free_addr ^ (1ULL << (cur_order));
         //   std::cout << "buddy address: " << buddy_address << std::endl;
